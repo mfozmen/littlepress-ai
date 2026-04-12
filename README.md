@@ -1,6 +1,13 @@
 # Child Book Generator
 
-A print-ready PDF generator for children's picture books. Feed it a simple JSON description (title, author, page texts, illustrations) and it produces an A5 picture book plus an optional A4 imposed booklet ready to fold and staple.
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=mfozmen_child-book-generator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=mfozmen_child-book-generator)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=mfozmen_child-book-generator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=mfozmen_child-book-generator)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=mfozmen_child-book-generator&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=mfozmen_child-book-generator)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=mfozmen_child-book-generator&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=mfozmen_child-book-generator)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=mfozmen_child-book-generator&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=mfozmen_child-book-generator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A print-ready PDF generator for children's picture books. The goal is simple: **a child should feel like a real author.** Feed it a JSON description (title, author, page texts, illustrations) and it produces an A5 picture book plus an optional A4 imposed booklet ready to fold and staple.
 
 ## Install
 
@@ -35,10 +42,12 @@ This produces a 2-page A5 picture book from the sample `examples/book.json` and 
 
 ## Project layout
 
-- `book.json` — book content (title, author, per-page text and image paths)
-- `images/` — page illustrations (PNG)
-- `src/` — generator modules
-- `output/` — generated PDFs
+- `build.py` — CLI entry point
+- `src/` — generator modules (schema, layout, PDF assembly, imposition, ingestion)
+- `examples/` — a runnable sample book (`book.json` + placeholder PNGs)
+- `tests/` — pytest suite, mirrors `src/`
+- `output/` — generated PDFs (gitignored)
+- your own `book.json` + `images/` at the repo root — private user content, gitignored
 
 ## `book.json` schema
 
@@ -57,6 +66,26 @@ Valid `layout` values: `image-top`, `image-bottom`, `image-full`, `text-only`.
 ## Printing the A4 booklet
 
 Print the `_A4_booklet.pdf` on A4 paper **double-sided, flipped on the short edge**. Fold the stack in half and staple along the spine — you now have an A5 book.
+
+## Testing
+
+The project follows **test-driven development**. Every feature and bug fix starts with a failing test.
+
+```bash
+pytest                               # full suite
+pytest --cov=src --cov=build         # with coverage (reported to SonarCloud)
+```
+
+## Roadmap
+
+The next milestone is a **dynamic ingestion pipeline**: drop in a PDF draft (scanned handwriting + drawings) and get a polished book automatically — with the child's original words preserved as the source of truth.
+
+- [x] Static pipeline: `book.json` → A5 PDF / A4 booklet
+- [x] `src/pdf_ingest.extract_pages()` — raw per-page text extraction
+- [ ] Embedded image extraction from PDF
+- [ ] `book.json` synthesis from extracted content
+- [ ] `build.py --from-pdf <path>` CLI integration
+- [ ] Handwriting OCR (opt-in, behind a flag — mechanical misread fixes only, never rewrites)
 
 ## License
 
