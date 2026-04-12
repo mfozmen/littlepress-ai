@@ -40,6 +40,8 @@ def load_book(json_path: Path) -> Book:
 
     if "title" not in raw:
         raise ValueError("'title' field is required in book.json.")
+    if not str(raw["title"]).strip():
+        raise ValueError("'title' field must not be empty in book.json.")
 
     cover_raw = raw.get("cover", {}) or {}
     back_raw = raw.get("back_cover", {}) or {}
