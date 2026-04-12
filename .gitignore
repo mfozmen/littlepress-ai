@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.env
+
+# User inputs (book content is per-user, not part of the generator)
+book.json
+images/
+
+# Generated outputs
+output/
+*.pdf
+
+# Fonts downloaded locally
+fonts/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/
