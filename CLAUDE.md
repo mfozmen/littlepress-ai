@@ -55,12 +55,24 @@ Valid `layout` values: `image-top`, `image-bottom`, `image-full`, `text-only`.
 - `pypdf>=4.0.0` — A4 booklet imposition
 - **DejaVu Sans** font (auto-discovered on the system; otherwise place in `fonts/`)
 
+## Current state
+
+- Git repository initialized (branch `main`); initial commit lands the generic generator code, README, LICENSE, and CLAUDE.md.
+- Published on GitHub as a public MIT repo: `mfozmen/child-book-generator`.
+- `book.json` and `images/` in the working tree are legacy private content and are gitignored. They are **not** part of the open-source project. A generic example under `examples/` is still TODO.
+
+## Open TODOs
+
+1. **Add a generic `examples/` directory** with sample `book.json` + placeholder/public-domain images so new users have something to run out of the box.
+2. **Implement `src/pdf_ingest.py`** — convert a PDF draft (scanned handwriting + drawings) into `book.json` + extracted `images/`. Wire it into `build.py` via `--from-pdf <path>`. This is the project's main feature goal.
+
 ## Development notes
 
 - Platform: Windows 11, bash shell (Unix paths: `/c/Users/...`).
-- **All code, comments, documentation, CLI output, and user-facing strings must be in English.** The project is open source and intended for a global audience.
+- **All code, comments, documentation, CLI output, and user-facing strings must be in English.** The project is open source and intended for a global audience. (The maintainer chats in Turkish, but nothing Turkish goes into the repo.)
 - New layouts require paired changes in `schema.py` (`VALID_LAYOUTS`) and `pages.py` (drawing function).
 - Children's-book aesthetics: generous margins, large body type (14pt default), image-led pages — all knobs live in `src/config.py`.
+- `.gitignore` excludes user inputs (`book.json`, `images/`), generated outputs (`output/`, `*.pdf`), local fonts (`fonts/`), and editor/OS/Claude state.
 - License: MIT.
 
 ## Print workflow
