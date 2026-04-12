@@ -16,6 +16,12 @@ env/
 output/
 *.pdf
 
+# Test / coverage artifacts
+.coverage
+.pytest_cache/
+coverage.xml
+htmlcov/
+
 # Fonts downloaded locally
 fonts/
 

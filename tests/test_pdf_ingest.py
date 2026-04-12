@@ -24,3 +24,22 @@ def test_extracts_raw_text_per_page_without_transforming(tmp_path):
     pages = extract_pages(pdf_path)
 
     assert [p.strip() for p in pages] == expected
+
+
+def test_empty_pdf_returns_empty_list(tmp_path):
+    pdf_path = _write_pdf(tmp_path, [])
+
+    assert extract_pages(pdf_path) == []
+
+
+def test_preserves_child_voice_verbatim(tmp_path):
+    """Typos, invented spellings, and odd grammar must pass through untouched.
+
+    This is the core contract: we never silently fix the child's text.
+    """
+    quirky = ["the dragn he was sad", "BOOOM went the ship"]
+    pdf_path = _write_pdf(tmp_path, quirky)
+
+    pages = [p.strip() for p in extract_pages(pdf_path)]
+
+    assert pages == quirky
