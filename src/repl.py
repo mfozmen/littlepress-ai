@@ -15,7 +15,7 @@ from rich.console import Console
 
 from src import session as session_mod
 from src.providers.llm import SPECS, ProviderSpec, find
-from src.providers.validator import KeyValidationError
+from src.providers.validator import KeyValidationError, ProviderUnavailable
 
 
 SlashHandler = Callable[["Repl", str], int | None]
@@ -162,6 +162,10 @@ class Repl:
                 return api_key
             try:
                 self._validate(spec, api_key)
+            except ProviderUnavailable as e:
+                # SDK missing, broken install, etc. Re-prompting won't help.
+                self._console.print(f"[red]{e}[/red]")
+                return None
             except KeyValidationError as e:
                 self._console.print(f"[red]{e}[/red]")
                 self._console.print(

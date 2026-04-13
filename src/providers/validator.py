@@ -12,9 +12,22 @@ from __future__ import annotations
 
 from src.providers.llm import ProviderSpec
 
+# Keep the ping short — a key with working DNS and TLS should answer in
+# well under a second. We'd rather surface a mistyped URL / offline state
+# quickly than let the SDK's default (~600 s) hang the REPL at the key
+# prompt.
+_VALIDATION_TIMEOUT_SECONDS = 5.0
+
 
 class KeyValidationError(Exception):
-    """Raised when the supplied API key cannot authenticate with the provider."""
+    """Raised when the provider rejects the supplied key. Re-promptable —
+    the REPL will ask for a new key."""
+
+
+class ProviderUnavailable(Exception):
+    """Raised when the provider cannot be used *at all* in this environment
+    (for example the SDK isn't installed). Re-prompting for a different
+    key won't help — the REPL aborts the current picker run."""
 
 
 def validate_key(spec: ProviderSpec, api_key: str) -> None:
@@ -27,35 +40,43 @@ def validate_key(spec: ProviderSpec, api_key: str) -> None:
     if not spec.requires_api_key:
         return
     checker = _CHECKERS.get(spec.name, _unchecked)
-    checker(api_key)
+    checker(spec, api_key)
 
 
-def _unchecked(_api_key: str) -> None:
+def _unchecked(_spec: ProviderSpec, _api_key: str) -> None:
     """Placeholder for providers that haven't gotten a ping yet."""
     return None
 
 
-def _check_anthropic(api_key: str) -> None:
+def _check_anthropic(spec: ProviderSpec, api_key: str) -> None:
     try:
         import anthropic  # type: ignore[import-not-found]
     except ImportError as e:
-        raise KeyValidationError(
+        raise ProviderUnavailable(
             "The 'anthropic' SDK isn't installed. Run: "
             "pip install 'child-book-generator[anthropic]'"
         ) from e
 
+    # Cheapest call that still exercises authentication. If the key is
+    # wrong the server returns 401, which the SDK surfaces as
+    # AuthenticationError once the round-trip completes.
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        # Cheapest possible call that still exercises auth. If the key is
-        # bad, the SDK raises AuthenticationError before we finish the
-        # request.
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=_VALIDATION_TIMEOUT_SECONDS,
+        )
         client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=spec.validation_model or _DEFAULT_VALIDATION_MODEL,
             max_tokens=1,
             messages=[{"role": "user", "content": "ping"}],
         )
     except getattr(anthropic, "AuthenticationError", Exception) as e:
         raise KeyValidationError(f"Anthropic rejected the key: {e}") from e
+
+
+# Fallback when a spec predates ``validation_model``. Keep in sync with
+# src/providers/llm.py so the two don't drift silently.
+_DEFAULT_VALIDATION_MODEL = "claude-haiku-4-5-20251001"
 
 
 _CHECKERS = {

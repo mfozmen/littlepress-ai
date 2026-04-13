@@ -11,7 +11,7 @@ import io
 from rich.console import Console
 
 from src.providers.llm import find
-from src.providers.validator import KeyValidationError
+from src.providers.validator import KeyValidationError, ProviderUnavailable
 from src.repl import Repl
 
 
@@ -134,3 +134,24 @@ def test_slash_model_aborted_after_bad_key_keeps_previous_provider():
     repl.run()
 
     assert repl.provider is ollama
+
+
+def test_provider_unavailable_aborts_instead_of_reprompting():
+    """Missing SDK is fatal: no amount of retyping the key will fix it,
+    so the REPL must NOT loop the key prompt. It aborts this picker run.
+    """
+    calls = {"n": 0}
+
+    def validate(_spec, _key):
+        calls["n"] += 1
+        raise ProviderUnavailable("install the anthropic extra")
+
+    repl, buf = _make(
+        ["2", "/exit"],
+        secrets=["whatever"],
+        validate=validate,
+    )
+    assert repl.run() == 0
+    assert calls["n"] == 1  # validator called exactly once, not looped
+    assert repl.provider is None
+    assert "install the anthropic extra" in buf.getvalue()

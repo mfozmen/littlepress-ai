@@ -23,18 +23,18 @@ def test_openai_and_google_are_unchecked_until_their_sdks_are_wired():
     validator.validate_key(find("google"), "key-anything")
 
 
-def test_anthropic_without_sdk_raises_helpful_error(monkeypatch):
-    """If the anthropic SDK isn't installed, point the user at the extra.
+def test_anthropic_without_sdk_raises_provider_unavailable(monkeypatch):
+    """Missing SDK is NOT a wrong-key condition; re-prompting won't fix it.
 
-    We make the lazy import fail by swapping sys.modules so the real
-    ``import anthropic`` inside ``validate_key`` raises ImportError.
+    The validator must raise ``ProviderUnavailable`` so the REPL aborts
+    instead of looping on the key prompt.
     """
     import sys
 
     real = sys.modules.get("anthropic")
     monkeypatch.setitem(sys.modules, "anthropic", None)
 
-    with pytest.raises(validator.KeyValidationError) as exc:
+    with pytest.raises(validator.ProviderUnavailable) as exc:
         validator.validate_key(find("anthropic"), "sk-test")
 
     msg = str(exc.value).lower()
@@ -61,6 +61,26 @@ def test_anthropic_accepts_key_when_sdk_returns_normally(monkeypatch):
     validator.validate_key(find("anthropic"), "sk-good")
 
 
+def test_anthropic_ping_sends_timeout_and_spec_model(monkeypatch):
+    """Guard against two regressions at once:
+
+    - The ping must run with a short timeout so a flaky network can't
+      hang the REPL for minutes (SDK default is ~600 s).
+    - The model id must come from the ProviderSpec, not a constant buried
+      in the validator, so retirements are a one-line change.
+    """
+    fake = _make_fake_anthropic(raise_error=None)
+    monkeypatch.setitem(__import__("sys").modules, "anthropic", fake)
+
+    spec = find("anthropic")
+    validator.validate_key(spec, "sk-good")
+
+    client_timeout = fake.Anthropic.last_timeout
+    create_kwargs = fake.Anthropic.last_client.messages.last_create_kwargs
+    assert client_timeout is not None and client_timeout > 0 and client_timeout <= 30
+    assert create_kwargs["model"] == spec.validation_model
+
+
 def _make_fake_anthropic(*, raise_error):
     """Build a module-shaped stub with Anthropic client and AuthenticationError."""
     import types
@@ -69,15 +89,24 @@ def _make_fake_anthropic(*, raise_error):
         pass
 
     class Messages:
-        def create(self, **_kwargs):
+        def __init__(self):
+            self.last_create_kwargs: dict = {}
+
+        def create(self, **kwargs):
+            self.last_create_kwargs = kwargs
             if raise_error == "auth":
                 raise AuthenticationError("bad key")
             return types.SimpleNamespace(content=[types.SimpleNamespace(text="ok")])
 
     class Client:
-        def __init__(self, *, api_key):
+        last_timeout: float | None = None
+        last_client: "Client | None" = None
+
+        def __init__(self, *, api_key, timeout=None):
             self.api_key = api_key
             self.messages = Messages()
+            Client.last_timeout = timeout
+            Client.last_client = self
 
     module = types.ModuleType("anthropic")
     module.Anthropic = Client
