@@ -152,6 +152,39 @@ def test_render_surfaces_error_when_build_fails(tmp_path, monkeypatch):
     assert "disk full" in buf.getvalue()
 
 
+def test_render_preserves_multiple_spaces_in_custom_path(tmp_path):
+    """args.split()+' '.join() would normalize two spaces into one and
+    write to the wrong file. The path must round-trip verbatim."""
+    odd_dir = tmp_path / "odd  name"  # two spaces on purpose
+    odd_dir.mkdir()
+    out = odd_dir / "book.pdf"
+
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+    repl, _ = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", f"/render --impose {out}", "/exit"],
+    )
+    repl.run()
+
+    assert out.is_file()
+
+
+def test_render_expands_tilde_in_custom_path(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+    repl, _ = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", "/render ~/book.pdf", "/exit"],
+    )
+    repl.run()
+
+    assert (fake_home / "book.pdf").is_file()
+
+
 def test_render_with_impose_flag_writes_a5_and_a4_booklet(tmp_path):
     pdf = _write_pdf(
         tmp_path, [{"text": "p1"}, {"text": "p2"}, {"text": "p3"}]

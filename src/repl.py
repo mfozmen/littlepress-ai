@@ -307,6 +307,27 @@ def _cmd_author(repl: Repl, args: str) -> None:
     return None
 
 
+import re as _re
+
+_IMPOSE_FLAG_RE = _re.compile(r"(?:^|\s)--impose(?=\s|$)")
+
+
+def _extract_impose_flag(args: str) -> tuple[bool, str]:
+    """Return ``(impose, rest)`` from ``/render`` arguments.
+
+    Matches ``--impose`` as a standalone token anywhere in the string and
+    removes it while preserving the exact whitespace around any remaining
+    output path. This matters because the user's path may legitimately
+    contain multiple spaces (``odd  name/book.pdf``), which a naive
+    ``split() + ' '.join()`` round-trip would collapse.
+    """
+    match = _IMPOSE_FLAG_RE.search(args)
+    if match is None:
+        return False, args.strip()
+    remaining = args[: match.start()] + args[match.end():]
+    return True, remaining.strip()
+
+
 def _cmd_render(repl: Repl, args: str) -> None:
     """Render the loaded draft into a finished A5 PDF."""
     if not _require_draft(repl):
@@ -321,9 +342,10 @@ def _cmd_render(repl: Repl, args: str) -> None:
     from src.builder import build_pdf
     from src.draft import slugify, to_book
 
-    tokens = args.split()
-    impose = "--impose" in tokens
-    remaining = " ".join(t for t in tokens if t != "--impose").strip()
+    # Pull --impose off without re-tokenising the rest of the string —
+    # the user's output path may contain runs of whitespace that
+    # split()+' '.join() would silently collapse.
+    impose, remaining = _extract_impose_flag(args)
 
     source_dir = (repl._session_root or Path.cwd()) / ".book-gen"
     if remaining:
