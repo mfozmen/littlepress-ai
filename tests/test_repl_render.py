@@ -152,6 +152,94 @@ def test_render_surfaces_error_when_build_fails(tmp_path, monkeypatch):
     assert "disk full" in buf.getvalue()
 
 
+def test_render_preserves_multiple_spaces_in_custom_path(tmp_path):
+    """args.split()+' '.join() would normalize two spaces into one and
+    write to the wrong file. The path must round-trip verbatim."""
+    odd_dir = tmp_path / "odd  name"  # two spaces on purpose
+    odd_dir.mkdir()
+    out = odd_dir / "book.pdf"
+
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+    repl, _ = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", f"/render --impose {out}", "/exit"],
+    )
+    repl.run()
+
+    assert out.is_file()
+
+
+def test_render_expands_tilde_in_custom_path(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+    repl, _ = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", "/render ~/book.pdf", "/exit"],
+    )
+    repl.run()
+
+    assert (fake_home / "book.pdf").is_file()
+
+
+def test_render_with_impose_flag_writes_a5_and_a4_booklet(tmp_path):
+    pdf = _write_pdf(
+        tmp_path, [{"text": "p1"}, {"text": "p2"}, {"text": "p3"}]
+    )
+
+    repl, buf = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", "/render --impose", "/exit"],
+    )
+    repl.run()
+
+    output_dir = tmp_path / ".book-gen" / "output"
+    a5 = output_dir / "book.pdf"
+    a4 = output_dir / "book_A4_booklet.pdf"
+    assert a5.is_file() and a5.stat().st_size > 0
+    assert a4.is_file() and a4.stat().st_size > 0
+    # Both file names surface so the user can find them.
+    assert a5.name in buf.getvalue()
+    assert a4.name in buf.getvalue()
+
+
+def test_render_impose_flag_order_independent(tmp_path):
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+    custom = tmp_path / "out" / "custom.pdf"
+
+    repl, _ = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", f"/render --impose {custom}", "/exit"],
+    )
+    repl.run()
+
+    assert custom.is_file()
+    assert (custom.parent / f"{custom.stem}_A4_booklet.pdf").is_file()
+
+
+def test_render_impose_failure_is_reported(tmp_path, monkeypatch):
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+
+    def boom(_src, _dst):
+        raise RuntimeError("imposition broke")
+
+    monkeypatch.setattr("src.imposition.impose_a5_to_a4", boom)
+
+    repl, buf = _make(
+        tmp_path,
+        [f"/load {pdf}", "/title Book", "/render --impose", "/exit"],
+    )
+    assert repl.run() == 0
+    # A5 was written before the booklet step; keep it so the user isn't
+    # empty-handed when the booklet step fails.
+    assert (tmp_path / ".book-gen" / "output" / "book.pdf").is_file()
+    assert "booklet" in buf.getvalue().lower()
+    assert "imposition broke" in buf.getvalue()
+
+
 def test_render_rerenders_cleanly(tmp_path):
     pdf = _write_pdf(tmp_path, [{"text": "first"}])
 
