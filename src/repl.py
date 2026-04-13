@@ -321,9 +321,13 @@ def _cmd_render(repl: Repl, args: str) -> None:
     from src.builder import build_pdf
     from src.draft import slugify, to_book
 
+    tokens = args.split()
+    impose = "--impose" in tokens
+    remaining = " ".join(t for t in tokens if t != "--impose").strip()
+
     source_dir = (repl._session_root or Path.cwd()) / ".book-gen"
-    if args.strip():
-        out_path = Path(args.strip()).expanduser()
+    if remaining:
+        out_path = Path(remaining).expanduser()
     else:
         out_path = source_dir / "output" / f"{slugify(repl.draft.title)}.pdf"
     try:
@@ -333,6 +337,20 @@ def _cmd_render(repl: Repl, args: str) -> None:
         repl._console.print(f"[red]Render failed:[/red] {e}")
         return None
     repl._console.print(f"[green]Wrote[/green] {out_path}")
+
+    if impose:
+        # A5 is already on disk; the booklet is a derived artefact. If it
+        # fails we keep the A5 and surface the error so the user still has
+        # something to print.
+        from src import imposition
+
+        booklet = out_path.with_name(f"{out_path.stem}_A4_booklet.pdf")
+        try:
+            imposition.impose_a5_to_a4(out_path, booklet)
+        except Exception as e:
+            repl._console.print(f"[red]Booklet imposition failed:[/red] {e}")
+            return None
+        repl._console.print(f"[green]Wrote[/green] {booklet}")
     return None
 
 
