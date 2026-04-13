@@ -1,6 +1,60 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-04-13)
+
+### Features
+
+- **repl**: Forward non-slash input to the active LLM
+  ([#12](https://github.com/mfozmen/child-book-generator/pull/12),
+  [`17fbee4`](https://github.com/mfozmen/child-book-generator/commit/17fbee470a226ebbce59fc09271853d2dcb22b3d))
+
+* feat(repl): forward non-slash input to the active LLM for single-turn chat
+
+Add an LLMProvider protocol and two concrete implementations in src/providers/llm.py:
+
+- NullProvider — offline default; chat() raises so callers must gate. - AnthropicProvider — Claude
+  via the anthropic SDK (lazy import so the offline path doesn't need the extra installed).
+
+create_provider(spec, api_key) returns the right instance; providers that haven't grown chat() yet
+  (OpenAI / Google / Ollama) fall back to NullProvider so the REPL keeps running with the offline
+  placeholder.
+
+Wire the REPL to build an LLMProvider on activation (initial and /model) through an injectable
+  llm_factory. Non-slash input now:
+
+- With NullProvider: prints "(no model selected — pick one with /model) <input>" so the user knows
+  why nothing happened. - With a real provider: forwards the line verbatim (preserve-child- voice)
+  and prints the plain-text reply.
+
+Errors from the LLM (network, rate limits, etc.) surface as "LLM error: <msg>" and the REPL keeps
+  running instead of crashing.
+
+Single-turn today — each line is sent as a fresh one-message conversation. Multi-turn memory and
+  tool use land with the agent loop (p2-01) in a follow-up PR.
+
+Coverage: src/providers/llm.py and src/repl.py both 100%; total 98%.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(llm): bound the Anthropic chat SDK call with a finite timeout
+
+The SDK default is ~600 s; a flaky network would freeze the REPL mid-conversation for up to 10
+  minutes. Pass a 60 s timeout when constructing the Anthropic client inside AnthropicProvider.chat
+  — same shape as the validator's ping timeout fixed in PR #6.
+
+New test asserts the chat client is built with a non-None timeout in the 0-300 s range, so a future
+  refactor can't silently drop it.
+
+Addresses review feedback on #12.
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.1.0 (2026-04-13)
 
 ### Bug Fixes
@@ -12,6 +66,11 @@ actions/setup-python v7 does not exist — revert to v6 (current latest). Bump
   SonarSource/sonarqube-scan-action v6 → v7 (current latest).
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 0.1.0 [skip ci]
+  ([`8c47e96`](https://github.com/mfozmen/child-book-generator/commit/8c47e96e118f8d6279665eb3505bd21959e0aaee))
 
 ### Continuous Integration
 
