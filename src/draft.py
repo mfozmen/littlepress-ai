@@ -99,7 +99,11 @@ def to_book(draft: Draft, source_dir: Path) -> Book:
                 image_str = str(p.image.relative_to(source_dir)).replace("\\", "/")
             except ValueError:
                 image_str = str(p.image)
-        schema_pages.append(Page(text=p.text, image=image_str))
+        # Rule 1 of .claude/skills/select-page-layout: pages with no image
+        # must render as text-only. Other pages keep the schema default
+        # (image-top) until the full parametric selector lands (p5-01).
+        layout = "text-only" if image_str is None else "image-top"
+        schema_pages.append(Page(text=p.text, image=image_str, layout=layout))
     return Book(
         title=draft.title.strip(),
         author=draft.author.strip(),

@@ -3,6 +3,8 @@ from reportlab.lib.pagesizes import A5
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+from pathlib import Path
+
 import pytest
 
 from src.draft import Draft, DraftPage, from_pdf, slugify, to_book
@@ -97,6 +99,27 @@ def test_from_pdf_parses_the_file_only_once(tmp_path, monkeypatch):
     draft_mod.from_pdf(pdf, tmp_path / "images")
 
     assert counter["n"] == 1
+
+
+def test_to_book_marks_imageless_pages_as_text_only():
+    """select-page-layout rule 1: no image → layout must be 'text-only'.
+
+    Leaving the schema default 'image-top' on an imageless page renders
+    an empty image slot and lies in the stored book.json.
+    """
+    draft = Draft(
+        source_pdf=Path("x.pdf"),
+        title="Book",
+        pages=[
+            DraftPage(text="no drawing on this page"),
+            DraftPage(text="this one has one", image=Path("images/p.png")),
+        ],
+    )
+
+    book = to_book(draft, Path("."))
+
+    assert book.pages[0].layout == "text-only"
+    assert book.pages[1].layout == "image-top"
 
 
 def test_to_book_requires_title(tmp_path):
