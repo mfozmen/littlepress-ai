@@ -1,6 +1,23 @@
+from importlib.metadata import PackageNotFoundError
+
 import pytest
 
 from src import cli
+
+
+def test_resolve_version_returns_installed_version():
+    # The dev install pins the package, so a real version string is available.
+    v = cli._resolve_version()
+    assert v
+    assert v != "0.0.0+dev"
+
+
+def test_resolve_version_falls_back_when_not_installed(monkeypatch):
+    def boom(_name):
+        raise PackageNotFoundError
+
+    monkeypatch.setattr(cli, "version", boom)
+    assert cli._resolve_version() == "0.0.0+dev"
 
 
 def test_cli_version_exits_zero_and_prints_version(capsys):

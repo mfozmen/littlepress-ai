@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "child-book-generator"
-version = "0.1.0"
+version = "0.0.0"
 description = "Turn a child's picture-book draft PDF into a print-ready A5 book and A4 booklet, preserving the child's voice."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -52,3 +52,19 @@ include = ["src", "tests", "examples", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.semantic_release]
+# Conventional Commits drive every version bump. feat -> minor, fix -> patch,
+# BREAKING CHANGE -> major. No manual version edits in pyproject.toml.
+version_toml = ["pyproject.toml:project.version"]
+branch = "main"
+commit_message = "chore(release): {version} [skip ci]"
+build_command = "python -m pip install build && python -m build"
+changelog_file = "CHANGELOG.md"
+upload_to_pypi = false
+upload_to_release = true
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
