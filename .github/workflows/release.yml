@@ -27,12 +27,38 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Python Semantic Release
+      - name: Python Semantic Release (bump + tag, no push)
         id: release
         uses: python-semantic-release/python-semantic-release@v9.15.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-        # No artifacts yet — PSR just bumps the version, writes
-        # CHANGELOG.md, tags, and cuts a GitHub Release with the
-        # auto-generated notes. The publish-action step is added back
-        # when PyPI publishing (or another artifact target) lands.
+          # Push=false so PSR writes the version bump commit + tag
+          # locally but doesn't push. We push in the next step with
+          # a rebase-retry so a non-fast-forward from another push
+          # arriving during this run doesn't lose the bump.
+          push: "false"
+
+      - name: Push release commit with rebase-retry
+        if: steps.release.outputs.released == 'true'
+        # When another push lands on main while PSR is running (e.g.
+        # a fast second merge), the naive push rejects as non-fast-
+        # forward and the whole bump is wasted. Rebase our release
+        # commit onto the fresh tip and retry a few times.
+        run: |
+          set -e
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin main --follow-tags; then
+              echo "Pushed release on attempt $attempt."
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; retrying..."
+            sleep 3
+          done
+          echo "Release push failed after 5 attempts."
+          exit 1
+
+      # No artifacts yet — PSR just bumps the version, writes
+      # CHANGELOG.md, tags, and cuts a GitHub Release with the
+      # auto-generated notes. The publish-action step is added back
+      # when PyPI publishing (or another artifact target) lands.

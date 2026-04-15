@@ -30,12 +30,15 @@ All five PRs from the original plan merged:
 - `Draft` vs `Book` — different jobs (lenient editable vs strict renderer-facing). `to_book` is the validation boundary.
 - `examples/book.json` + placeholder PNGs — used by `tests/test_build.py` to smoke the standalone renderer.
 
+## Next up
+
+- **More LLM providers — real `chat()` + `turn()` for Gemini / OpenAI / Ollama.** Today only Anthropic has a working implementation; the others are in the picker but fall back to `NullProvider`. Gemini is the priority because its free tier (1.5k req/day, tool-use capable) lets users run Littlepress without a credit card. Ollama enables fully offline use. One PR per provider keeps reviews small.
+
 ## Explicitly deferred (don't build unless asked)
 
 - **Illustration generation.** Separate project.
 - **OCR for handwritten scans.** Current PDFs have extractable text; add when a real draft needs it.
 - **Full parametric layout engine.** `choose_layout` applies the skill's rule 1 and simple aspect-ratio branching; parametric splits can wait.
-- **Multi-provider `chat()` implementations.** OpenAI / Gemini / Ollama adapters are one file each when requested; `NullProvider` covers the offline path until then.
 
 ---
 
