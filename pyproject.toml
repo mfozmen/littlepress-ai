@@ -47,6 +47,10 @@ littlepress = "src.cli:main"
 # Alias matching the PyPI package name so `uvx littlepress-ai` and
 # `pipx run littlepress-ai` work without `--from`.
 littlepress-ai = "src.cli:main"
+# Deprecated alias for the pre-rename name; keep for one release so
+# editable installs that already had it keep working. Plan to remove
+# in the next minor bump.
+child-book-generator = "src.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/mfozmen/littlepress-ai"

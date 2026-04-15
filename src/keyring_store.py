@@ -38,6 +38,10 @@ def load_key(provider_name: str) -> str | None:
     except Exception:
         return None
     if value is not None:
+        # A previous migration may have set the new entry but failed
+        # the legacy delete; sweep any stale copies now so they don't
+        # live in the OS keychain forever.
+        _sweep_legacy(provider_name)
         return value
     # Not under the current service — try the legacy name, migrate once.
     for legacy in _LEGACY_SERVICES:
@@ -66,3 +70,15 @@ def delete_key(provider_name: str) -> None:
         _keyring.delete_password(SERVICE, provider_name)
     except Exception:
         pass
+    # Clear any stale legacy entries too — /logout must not leave an
+    # old-named credential behind.
+    _sweep_legacy(provider_name)
+
+
+def _sweep_legacy(provider_name: str) -> None:
+    """Best-effort cleanup of entries under our old service names."""
+    for legacy in _LEGACY_SERVICES:
+        try:
+            _keyring.delete_password(legacy, provider_name)
+        except Exception:
+            pass
