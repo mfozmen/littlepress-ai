@@ -13,6 +13,7 @@ beyond mechanical substring substitutions.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -22,9 +23,17 @@ from src.schema import VALID_LAYOUTS
 
 
 _METADATA_FIELDS = {"title", "author", "cover_subtitle", "back_cover_text"}
+# set_metadata preserves whitespace on these fields — they carry the
+# child's own words (cover subtitle, back-cover blurb) and should not
+# be silently mutated. Title / author are conventional metadata and
+# can be trimmed.
+_CHILD_VOICE_FIELDS = {"cover_subtitle", "back_cover_text"}
 # "Typo" caps — anything beyond a short phrase is a story edit in disguise.
 _MAX_TYPO_CHARS = 30
 _MAX_TYPO_WORDS = 3
+# How many characters of surrounding page text to show in the y/n prompt
+# so the user sees what they're actually approving (not just a→b).
+_TYPO_CONTEXT_CHARS = 25
 
 
 def read_draft_tool(get_draft: Callable[[], Draft | None]) -> Tool:
@@ -92,6 +101,13 @@ def propose_typo_fix_tool(
                 f"Page {page_n} is out of range — the draft has "
                 f"{len(draft.pages)} pages."
             )
+        if not before:
+            return (
+                "Rejected: 'before' must not be empty. propose_typo_fix "
+                "corrects an existing typo — it does NOT insert new text "
+                "into the child's page. If you want to add something, ask "
+                "the user to write it themselves."
+            )
         if (
             len(before) > _MAX_TYPO_CHARS
             or len(after) > _MAX_TYPO_CHARS
@@ -107,24 +123,37 @@ def propose_typo_fix_tool(
             )
 
         page = draft.pages[page_n - 1]
-        if before not in page.text:
+        # Word-boundary match so 'cat' → 'dog' never rewrites 'scatter'.
+        pattern = r"(?<!\w)" + re.escape(before) + r"(?!\w)"
+        match = re.search(pattern, page.text)
+        if match is None:
             return (
-                f"Rejected: the string '{before}' does not appear on page "
-                f"{page_n}. Don't invent substitutions — propose a fix only "
-                "when you can see the typo in the child's text."
+                f"Rejected: the word '{before}' does not appear on page "
+                f"{page_n} as a whole word. Don't invent substitutions — "
+                "propose a fix only when you can see the typo verbatim in "
+                "the child's text."
             )
 
+        # Surface surrounding context so the user knows what they're
+        # approving, not just `a → b`.
+        start = max(0, match.start() - _TYPO_CONTEXT_CHARS)
+        end = min(len(page.text), match.end() + _TYPO_CONTEXT_CHARS)
+        context = page.text[start:end].replace("\n", " ")
+        prefix = "…" if start > 0 else ""
+        suffix = "…" if end < len(page.text) else ""
         prompt = (
             f"Page {page_n}: fix '{before}' → '{after}'"
             + (f" ({reason})" if reason else "")
-            + "?"
+            + f" in: {prefix}{context}{suffix}"
         )
         if not confirm(prompt):
             return (
                 f"User declined. Keep page {page_n} exactly as the child wrote it."
             )
 
-        page.text = page.text.replace(before, after, 1)
+        page.text = (
+            page.text[: match.start()] + after + page.text[match.end():]
+        )
         return f"Applied on page {page_n}. New text: {page.text!r}"
 
     return Tool(
@@ -162,13 +191,15 @@ def set_metadata_tool(get_draft: Callable[[], Draft | None]) -> Tool:
         if draft is None:
             return "No draft loaded. Ask the user to provide a PDF first."
         field_ = str(input_["field"])
-        value = str(input_.get("value", "")).strip()
+        raw_value = str(input_.get("value", ""))
         if field_ not in _METADATA_FIELDS:
             return (
                 f"Invalid field '{field_}'. Allowed fields: "
                 f"{sorted(_METADATA_FIELDS)}. Page text is NOT a metadata "
                 "field — use propose_typo_fix for that."
             )
+        # Preserve child-voice content verbatim; only clean up admin fields.
+        value = raw_value if field_ in _CHILD_VOICE_FIELDS else raw_value.strip()
         setattr(draft, field_, value)
         return f"{field_} set to: {value!r}"
 

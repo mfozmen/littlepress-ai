@@ -191,6 +191,67 @@ def test_propose_typo_fix_requires_draft_to_be_loaded():
     assert "no draft" in result.lower()
 
 
+def test_propose_typo_fix_rejects_empty_before_string():
+    """preserve-child-voice: an empty 'before' is text insertion, not a
+    typo fix. `"" in s` is always True and `s.replace("", x, 1)` prepends
+    x at position 0 — the agent could insert arbitrary content into the
+    child's pages with a single y/n. Reject before prompting."""
+    draft = _one_page_draft("the dragon was sad")
+    confirmed = []
+    tool = propose_typo_fix_tool(
+        get_draft=lambda: draft,
+        confirm=lambda p: confirmed.append(p) or True,
+    )
+
+    result = tool.handler(
+        {"page": 1, "before": "", "after": "Once upon a time, ", "reason": "intro"}
+    )
+
+    assert draft.pages[0].text == "the dragon was sad"
+    assert "empty" in result.lower() or "cannot be empty" in result.lower()
+    assert confirmed == []  # user was never asked
+
+
+def test_propose_typo_fix_uses_word_boundary_match():
+    """'cat' → 'dog' must NOT rewrite 'scatter' to 'sdogter'. The match
+    has to be a whole word."""
+    draft = _one_page_draft("the cat scatter around")
+    confirmed_prompts = []
+    tool = propose_typo_fix_tool(
+        get_draft=lambda: draft,
+        confirm=lambda p: confirmed_prompts.append(p) or True,
+    )
+
+    result = tool.handler(
+        {"page": 1, "before": "cat", "after": "dog", "reason": "spelling"}
+    )
+
+    # Exactly one substitution — the word 'cat', not the 'cat' in 'scatter'.
+    assert draft.pages[0].text == "the dog scatter around"
+    assert "applied" in result.lower()
+
+
+def test_propose_typo_fix_prompt_includes_surrounding_context():
+    """The y/n prompt must show enough surrounding text that the user
+    can see exactly what's changing — not just 'cat → dog'."""
+    draft = _one_page_draft("once the dragn flew over the mountain")
+    captured = []
+    tool = propose_typo_fix_tool(
+        get_draft=lambda: draft,
+        confirm=lambda p: captured.append(p) or True,
+    )
+
+    tool.handler(
+        {"page": 1, "before": "dragn", "after": "dragon", "reason": "typo"}
+    )
+
+    assert captured, "user should have been prompted"
+    prompt = captured[0]
+    # Some context around the match is in the prompt (any neighbouring
+    # word from the page text is enough).
+    assert "flew" in prompt or "once" in prompt or "the" in prompt
+
+
 def test_propose_typo_fix_schema_lists_all_required_fields():
     tool = propose_typo_fix_tool(get_draft=lambda: None, confirm=lambda _p: True)
 
@@ -240,13 +301,32 @@ def test_set_metadata_rejects_unknown_field():
     assert "random_field" in result or "unknown" in result.lower() or "invalid" in result.lower()
 
 
-def test_set_metadata_strips_whitespace():
+def test_set_metadata_strips_whitespace_on_title_and_author():
     draft = _one_page_draft("hi")
     tool = set_metadata_tool(get_draft=lambda: draft)
 
     tool.handler({"field": "title", "value": "  spaced out  "})
+    tool.handler({"field": "author", "value": "  Yusuf  "})
 
     assert draft.title == "spaced out"
+    assert draft.author == "Yusuf"
+
+
+def test_set_metadata_preserves_whitespace_on_child_voice_fields():
+    """cover_subtitle and back_cover_text are child-voice content. Leading
+    or trailing whitespace the child wrote stays — preserve-child-voice."""
+    draft = _one_page_draft("hi")
+    tool = set_metadata_tool(get_draft=lambda: draft)
+
+    tool.handler(
+        {"field": "cover_subtitle", "value": "  a dragon story  "}
+    )
+    tool.handler(
+        {"field": "back_cover_text", "value": "\nthe end!\n"}
+    )
+
+    assert draft.cover_subtitle == "  a dragon story  "
+    assert draft.back_cover_text == "\nthe end!\n"
 
 
 def test_set_metadata_requires_draft():
