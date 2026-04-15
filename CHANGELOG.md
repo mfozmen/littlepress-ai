@@ -1,7 +1,72 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-04-15)
+
+### Features
+
+- **agent**: Edit tools — typo fix, metadata, cover, layout
+  ([#14](https://github.com/mfozmen/child-book-generator/pull/14),
+  [`1c28559`](https://github.com/mfozmen/child-book-generator/commit/1c28559ebc44d2730484c9581105d57884954250))
+
+* feat(agent): edit tools — typo fix, metadata, cover, layout
+
+Ships PR #14 from docs/PLAN.md. The agent now has four additional tools plus a user-confirmation
+  path so it can actually build up a book through conversation:
+
+- propose_typo_fix(page, before, after, reason) — the ONLY way page text ever changes. Bounded to
+  mechanical substitutions (≤30 chars and ≤3 words per side) and requires a REPL-level y/n. Rejects
+  missing 'before' substrings so the agent can't invent edits. - set_metadata(field, value) — title,
+  author, cover_subtitle, back_cover_text. Page text is explicitly NOT a valid field; the enum on
+  the input_schema keeps the model honest, and the handler double-checks. - set_cover(page) — use
+  one of the draft's drawings as the cover. Rejects pages without a drawing. - choose_layout(page,
+  layout, reason) — set per-page layout. Enforces select-page-layout rule 1 (imageless → text-only)
+  at the tool boundary; rejects invalid layout names.
+
+Infrastructure: - Draft grows layout, cover_image, cover_subtitle, back_cover_text fields (all
+  optional, default empty). to_book projects them into the Book the renderer wants. -
+  Repl._confirm(prompt) reads a y/n via the existing read_line, accepting 'y' / 'yes' / 'evet' / 'e'
+  for yes and treating EOF / anything else as no. Preserve-child-voice: silence is never 'yes,
+  change the kid's words'.
+
+Coverage: src/agent_tools.py, src/repl.py, src/draft.py, all
+
+100%; total 98%. 193 tests.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(agent): close three preserve-child-voice holes in edit tools
+
+Addresses review feedback on #14. Each finding was a real path for agent-driven silent mutation of
+  the child's words; each now has a regression test.
+
+1. propose_typo_fix accepted empty 'before', turning a 'fix' tool into a 'insert arbitrary text at
+  position 0' tool. Reject empty 'before' explicitly, before prompting the user.
+
+2. propose_typo_fix did naive substring replace — 'cat' → 'dog' rewrote 'scatter' into 'sdogter'.
+  Match with word boundaries (\b via regex) so only whole-word typos match, and include ±25 chars of
+  surrounding page text in the y/n prompt so the user sees what they're approving instead of just 'a
+  → b'.
+
+3. set_metadata silently .strip()'d every value, including the child-voice fields cover_subtitle and
+  back_cover_text. Keep the strip on title/author (conventional metadata) but preserve whitespace
+  verbatim for child-voice fields.
+
+197 tests; src/agent_tools.py remains 100% covered.
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.3.0 (2026-04-15)
+
+### Chores
+
+- **release**: 0.3.0 [skip ci]
+  ([`023c5ab`](https://github.com/mfozmen/child-book-generator/commit/023c5abef0fdd8f801e90d7231fb8a681f9194f5))
 
 ### Documentation
 
