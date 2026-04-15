@@ -90,6 +90,12 @@ class Repl:
     def draft(self) -> Draft | None:
         return self._draft
 
+    def set_draft(self, draft: Draft) -> None:
+        """Inject a draft before ``run()`` starts, e.g. when the CLI was
+        given a PDF argument and we want the REPL to open with the draft
+        already ingested."""
+        self._draft = draft
+
     def _images_dir(self) -> Path:
         """Where extracted / generated images live. Session-scoped so
         ``.gitignore``'s ``.book-gen/`` rule covers them automatically."""
