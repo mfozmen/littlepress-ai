@@ -108,4 +108,56 @@ def test_delete_tolerates_backend_failure(monkeypatch):
 def test_service_name_is_stable():
     # Future refactors that change the service string would orphan
     # every saved key. Pin the value.
-    assert keyring_store.SERVICE == "child-book-generator"
+    assert keyring_store.SERVICE == "littlepress"
+
+
+def test_load_migrates_key_from_legacy_service_name(fake):
+    """Users upgrading from the child-book-generator era have keys under
+    the old service name. The first load_key call transparently moves
+    them to the new name and returns the value."""
+    fake.set_password("child-book-generator", "anthropic", "sk-ant-legacy")
+
+    value = keyring_store.load_key("anthropic")
+
+    assert value == "sk-ant-legacy"
+    # The new service now holds it.
+    assert fake.get_password("littlepress", "anthropic") == "sk-ant-legacy"
+    # The legacy entry is gone so we don't migrate twice.
+    assert fake.get_password("child-book-generator", "anthropic") is None
+
+
+def test_load_prefers_current_service_over_legacy(fake):
+    """If both exist (e.g. user manually re-paste'd after the rename and
+    the legacy entry was never cleaned), the current one wins."""
+    fake.set_password("littlepress", "anthropic", "sk-ant-current")
+    fake.set_password("child-book-generator", "anthropic", "sk-ant-legacy")
+
+    assert keyring_store.load_key("anthropic") == "sk-ant-current"
+    # Legacy entry is left alone in this case.
+    assert fake.get_password("child-book-generator", "anthropic") == "sk-ant-legacy"
+
+
+def test_migration_tolerates_write_failure(monkeypatch):
+    """If moving the legacy entry to the new service fails mid-way,
+    load_key must still return the value so the current launch works."""
+
+    class PartlyBroken:
+        class errors:
+            class PasswordDeleteError(Exception):
+                pass
+
+        def __init__(self):
+            self.store = {("child-book-generator", "anthropic"): "sk-legacy"}
+
+        def get_password(self, service, username):
+            return self.store.get((service, username))
+
+        def set_password(self, *_a, **_kw):
+            raise RuntimeError("read-only keyring")
+
+        def delete_password(self, *_a, **_kw):  # pragma: no cover
+            pass
+
+    monkeypatch.setattr(keyring_store, "_keyring", PartlyBroken())
+    # Must not raise; must return the legacy value.
+    assert keyring_store.load_key("anthropic") == "sk-legacy"

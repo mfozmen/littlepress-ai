@@ -1,4 +1,4 @@
-"""Interactive shell loop for child-book-generator.
+"""Interactive shell loop for littlepress.
 
 Owns the read loop, slash-command dispatch, provider picker, and the
 in-memory draft. Non-slash input is routed through an ``Agent`` (see
@@ -132,7 +132,7 @@ class Repl:
         return self._commands
 
     def run(self) -> int:
-        self._console.print("[bold]child-book-generator[/bold]")
+        self._console.print("[bold]littlepress[/bold]")
         self._console.print(
             "Type [cyan]/help[/cyan] for commands, [cyan]/exit[/cyan] to leave.\n"
         )
