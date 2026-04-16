@@ -9,7 +9,9 @@ VALID_LAYOUTS = {"image-top", "image-full", "text-only", "image-bottom"}
 # - ``framed``: letterboxed drawing under a title band at the top.
 # - ``poster``: type-only; no drawing. Fallback for books whose
 #   child-author didn't make a cover illustration.
-VALID_COVER_STYLES = {"full-bleed", "framed", "poster"}
+VALID_COVER_STYLES = {
+    "full-bleed", "framed", "poster", "portrait-frame", "title-band-top",
+}
 
 
 @dataclass
