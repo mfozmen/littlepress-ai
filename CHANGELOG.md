@@ -5,6 +5,44 @@
 
 ### Bug Fixes
 
+- **repl**: Accept /exit in the provider picker
+  ([#23](https://github.com/mfozmen/littlepress-ai/pull/23),
+  [`2478190`](https://github.com/mfozmen/littlepress-ai/commit/24781907d09377cc3be64d567423357d52ebe393))
+
+* fix(repl): accept /exit in the provider picker
+
+Reported: typing /exit at the first-launch picker printed "Please
+
+enter a number 1-4" instead of leaving the session. The picker's input reader only knew about
+  numbers; slash commands were treated as "not a number" and re-prompted.
+
+/exit now aborts the picker (same as EOF / Ctrl-D). Other slash commands (/help, /model, etc.) are
+  meaningless before a provider is activated, so steer the user toward a number or /exit instead of
+  mislabelling them as non-numeric input.
+
+Two regression tests: /exit alone exits zero with no "enter a number" nag; a different slash command
+  prints a hint that mentions /exit before the user finally picks a provider.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: plan Claude-Code-style / menu and a logical slash command order
+
+Record the two deferred UX items discussed with the maintainer:
+
+1. A \`/\` auto-completion menu like Claude Code / Cursor, surfacing each slash command with a
+  one-line description. Implementation lane: swap builtins.input for prompt_toolkit.PromptSession
+  with a custom Completer.
+
+2. Reorder the slash commands to match the typical workflow — ingest → inspect → metadata → render →
+  session/auth — rather than the current registration order. Concrete order committed to PLAN.md so
+  the next PR has a target to match.
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
 - **repl**: Retry with same key on transient errors instead of re-reading
   ([#22](https://github.com/mfozmen/littlepress-ai/pull/22),
   [`86939ac`](https://github.com/mfozmen/littlepress-ai/commit/86939acfe12276581bd8762d81397a4bc6ba5b1e))
@@ -28,6 +66,11 @@ Two new tests pin the behaviour: the same key is validated twice on Enter-retry,
 Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.0.2 [skip ci]
+  ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
 
 ### Continuous Integration
 
