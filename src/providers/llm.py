@@ -250,7 +250,11 @@ def _block_to_dict(block) -> dict:
 # whole reason for adding this provider: users can run Littlepress
 # without a credit card.
 _GOOGLE_CHAT_MODEL = "gemini-2.5-flash"
-_GOOGLE_CHAT_TIMEOUT_SECONDS = 60.0
+# Default timeout matches the Anthropic chat timeout — 60 s leaves room
+# for a normal reply while still surfacing a stuck network quickly
+# instead of letting the SDK's multi-minute default hang the REPL.
+# The Gen AI SDK expects milliseconds in ``HttpOptions(timeout=...)``.
+_GOOGLE_CHAT_TIMEOUT_MS = 60_000
 
 
 class GoogleProvider:
@@ -264,6 +268,14 @@ class GoogleProvider:
     in. Anything the agent doesn't understand (unknown part types)
     is dropped rather than surfaced; a future iteration can widen
     the translator.
+
+    Supported tool input_schema subset (forwarded as Gemini
+    ``FunctionDeclaration.parameters``): JSON Schema types, properties,
+    required, enum, description, array items, object nesting. Features
+    google-genai doesn't reliably understand — ``oneOf`` / ``anyOf``,
+    ``$ref``, ``additionalProperties``, ``const``, ``default`` — would
+    either be dropped silently or raise at call time; the project's
+    current tools don't use any of those.
     """
 
     def __init__(
@@ -275,21 +287,33 @@ class GoogleProvider:
         self._api_key = api_key
         self._model = model
 
+    def _client(self, genai, gtypes):
+        # Centralised so chat() and turn() can't drift on the timeout
+        # hedge — both build the client the same way.
+        return genai.Client(
+            api_key=self._api_key,
+            http_options=gtypes.HttpOptions(timeout=_GOOGLE_CHAT_TIMEOUT_MS),
+        )
+
     def chat(self, messages: list[Message]) -> str:
         genai, gtypes = _import_google_genai()
-        client = genai.Client(api_key=self._api_key)
+        client = self._client(genai, gtypes)
         contents = _messages_to_gemini_contents(messages, gtypes)
         response = client.models.generate_content(
             model=self._model,
             contents=contents,
         )
-        return response.text or ""
+        # ``response.text`` is a property that *raises* ``ValueError``
+        # when there are no text parts (SAFETY block, function-only
+        # response). Compose from the candidates ourselves so a blocked
+        # prompt returns an empty string instead of a traceback.
+        return _collect_text_from_candidates(response)
 
     def turn(self, messages: list[dict], tools: list) -> "object":
         genai, gtypes = _import_google_genai()
         from src.agent import AgentResponse
 
-        client = genai.Client(api_key=self._api_key)
+        client = self._client(genai, gtypes)
         contents = _messages_to_gemini_contents(messages, gtypes)
 
         kwargs: dict = {"model": self._model, "contents": contents}
@@ -309,6 +333,18 @@ class GoogleProvider:
         response = client.models.generate_content(**kwargs)
         blocks, stop_reason = _gemini_response_to_blocks(response)
         return AgentResponse(content=blocks, stop_reason=stop_reason)
+
+
+def _collect_text_from_candidates(response) -> str:
+    """Safe text extraction from a Gemini response. Returns the
+    concatenated text across the first candidate's parts, or empty
+    string if the response has no text (e.g. SAFETY-blocked)."""
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return ""
+    content = getattr(candidates[0], "content", None)
+    parts = getattr(content, "parts", None) or []
+    return "".join(getattr(p, "text", None) or "" for p in parts)
 
 
 def _import_google_genai():
@@ -377,11 +413,19 @@ def _messages_to_gemini_contents(messages: list[dict], gtypes) -> list:
                 )
             elif btype == "tool_result":
                 has_tool_result = True
-                name = id_to_name.get(block.get("tool_use_id", ""), "")
+                tool_use_id = block.get("tool_use_id", "")
+                name = id_to_name.get(tool_use_id, "")
+                # Construct FunctionResponse directly so we can forward
+                # the id. Without it, parallel same-name calls lose
+                # correlation — Gemini can't tell which function_call
+                # this response pairs with.
                 parts.append(
-                    gtypes.Part.from_function_response(
-                        name=name,
-                        response={"result": block.get("content", "")},
+                    gtypes.Part(
+                        function_response=gtypes.FunctionResponse(
+                            id=tool_use_id,
+                            name=name,
+                            response={"result": block.get("content", "")},
+                        )
                     )
                 )
         if has_tool_result:
@@ -396,18 +440,24 @@ def _messages_to_gemini_contents(messages: list[dict], gtypes) -> list:
 
 def _gemini_response_to_blocks(response) -> tuple[list[dict], str]:
     """Translate Gemini ``generate_content`` response → Anthropic-style
-    blocks + stop_reason the agent understands."""
+    blocks + stop_reason the agent understands.
+
+    Non-STOP finish reasons (SAFETY, RECITATION, MAX_TOKENS) get a
+    synthetic text block telling the user why the model stopped —
+    otherwise the REPL just goes silent and the user has no way to
+    know the prompt was blocked. Stop reason stays ``end_turn`` since
+    the agent has only two stop signals today.
+    """
     import uuid
 
     blocks: list[dict] = []
     candidates = getattr(response, "candidates", None) or []
     if not candidates:
         return blocks, "end_turn"
-    content = getattr(candidates[0], "content", None)
-    if content is None:
-        return blocks, "end_turn"
+    candidate = candidates[0]
+    content = getattr(candidate, "content", None)
     any_tool_use = False
-    for part in getattr(content, "parts", []) or []:
+    for part in getattr(content, "parts", None) or []:
         text = getattr(part, "text", None)
         if text:
             blocks.append({"type": "text", "text": text})
@@ -426,6 +476,23 @@ def _gemini_response_to_blocks(response) -> tuple[list[dict], str]:
                 "id": fc_id,
                 "name": getattr(fc, "name", ""),
                 "input": dict(getattr(fc, "args", None) or {}),
+            }
+        )
+    # Surface non-STOP finish reasons so a blocked prompt isn't silent.
+    finish_reason = getattr(candidate, "finish_reason", None)
+    if (
+        finish_reason is not None
+        and str(finish_reason).upper() not in {"STOP", "FINISH_REASON_UNSPECIFIED"}
+        and not any_tool_use
+    ):
+        blocks.append(
+            {
+                "type": "text",
+                "text": (
+                    f"[Gemini stopped with reason: {finish_reason}. "
+                    "No further output was generated — try rephrasing "
+                    "or splitting the prompt.]"
+                ),
             }
         )
     return blocks, ("tool_use" if any_tool_use else "end_turn")

@@ -304,14 +304,18 @@ def test_block_to_dict_handles_blocks_without_model_dump(monkeypatch):
 # --- GoogleProvider (Gemini) -------------------------------------------
 
 
-def _install_fake_google_genai(monkeypatch, *, response_parts=None, reply_text=None):
+def _install_fake_google_genai(
+    monkeypatch,
+    *,
+    response_parts=None,
+    finish_reason="STOP",
+):
     """Install a minimal fake of ``google.genai`` so GoogleProvider
     can be exercised without network access.
 
     ``response_parts`` — list of Part-like objects to hand back from
-    ``generate_content``. If None, a plain text response is produced.
-    ``reply_text`` — the ``response.text`` value when using the chat
-    happy path (the SDK exposes ``.text`` as a convenience).
+    ``generate_content``. If None, the fake returns no candidates.
+    ``finish_reason`` — the stop signal on the first candidate.
     """
 
     class Content:
@@ -319,8 +323,16 @@ def _install_fake_google_genai(monkeypatch, *, response_parts=None, reply_text=N
             self.role = role
             self.parts = list(parts or [])
 
+    class FunctionResponse:
+        def __init__(self, name=None, response=None, id=None):
+            self.name = name
+            self.response = response
+            self.id = id
+
     class Part:
-        def __init__(self, text=None, function_call=None, function_response=None):
+        def __init__(
+            self, text=None, function_call=None, function_response=None
+        ):
             self.text = text
             self.function_call = function_call
             self.function_response = function_response
@@ -328,10 +340,6 @@ def _install_fake_google_genai(monkeypatch, *, response_parts=None, reply_text=N
         @classmethod
         def from_text(cls, text):
             return cls(text=text)
-
-        @classmethod
-        def from_function_response(cls, name, response):
-            return cls(function_response={"name": name, "response": response})
 
     class FunctionCall:
         def __init__(self, name, args=None, id=None):
@@ -353,27 +361,50 @@ def _install_fake_google_genai(monkeypatch, *, response_parts=None, reply_text=N
         def __init__(self, tools=None):
             self.tools = tools or []
 
+    class HttpOptions:
+        def __init__(self, timeout=None, **kw):
+            self.timeout = timeout
+            self.kwargs = kw
+
     types_mod = types.ModuleType("google.genai.types")
     types_mod.Content = Content
     types_mod.Part = Part
     types_mod.FunctionCall = FunctionCall
+    types_mod.FunctionResponse = FunctionResponse
     types_mod.FunctionDeclaration = FunctionDeclaration
     types_mod.Tool = Tool
     types_mod.GenerateContentConfig = GenerateContentConfig
+    types_mod.HttpOptions = HttpOptions
 
     class Candidate:
-        def __init__(self, content):
+        def __init__(self, content, finish_reason="STOP"):
             self.content = content
+            self.finish_reason = finish_reason
 
     class Response:
         def __init__(self):
-            self.text = reply_text or ""
             if response_parts is not None:
                 self.candidates = [
-                    Candidate(Content(role="model", parts=response_parts))
+                    Candidate(
+                        Content(role="model", parts=response_parts),
+                        finish_reason=finish_reason,
+                    )
                 ]
             else:
                 self.candidates = []
+
+        @property
+        def text(self):
+            # Real SDK raises ValueError when there are no text parts
+            # (e.g. SAFETY-blocked). Mirror that so the provider has
+            # to defensively iterate parts itself.
+            if not self.candidates:
+                raise ValueError("No candidates available.")
+            parts = getattr(self.candidates[0].content, "parts", None) or []
+            texts = [getattr(p, "text", None) for p in parts]
+            if not any(texts):
+                raise ValueError("No text parts in response.")
+            return "".join(t or "" for t in texts)
 
     class Models:
         def __init__(self):
@@ -386,8 +417,9 @@ def _install_fake_google_genai(monkeypatch, *, response_parts=None, reply_text=N
     class Client:
         last_client: "Client | None" = None
 
-        def __init__(self, *, api_key, **kw):
+        def __init__(self, *, api_key, http_options=None, **kw):
             self.api_key = api_key
+            self.http_options = http_options
             self.kwargs = kw
             self.models = Models()
             Client.last_client = self
@@ -406,7 +438,9 @@ def _install_fake_google_genai(monkeypatch, *, response_parts=None, reply_text=N
 
 
 def test_google_provider_chat_returns_reply_text(monkeypatch):
-    _install_fake_google_genai(monkeypatch, reply_text="hello from gemini")
+    _, types_mod = _install_fake_google_genai(monkeypatch)
+    text_part = types_mod.Part.from_text(text="hello from gemini")
+    _install_fake_google_genai(monkeypatch, response_parts=[text_part])
 
     reply = GoogleProvider(api_key="AIzaFake").chat(
         [{"role": "user", "content": "hi"}]
@@ -415,9 +449,48 @@ def test_google_provider_chat_returns_reply_text(monkeypatch):
     assert reply == "hello from gemini"
 
 
+def test_google_provider_chat_handles_safety_blocked_response(monkeypatch):
+    """Real SDK's ``response.text`` property *raises* ``ValueError`` when
+    there are no text parts (e.g. SAFETY finish). ``chat`` must compose
+    the reply from ``candidates[0].content.parts`` so a blocked prompt
+    returns an empty string instead of a traceback."""
+    _install_fake_google_genai(
+        monkeypatch, response_parts=[], finish_reason="SAFETY"
+    )
+
+    # Must not raise.
+    reply = GoogleProvider(api_key="k").chat(
+        [{"role": "user", "content": "bad prompt"}]
+    )
+    assert reply == ""
+
+
+def test_google_provider_chat_passes_bounded_timeout_via_http_options(monkeypatch):
+    """The Gen AI SDK's default timeout is ~600 s, which would freeze
+    the REPL on a flaky network — see PR #12 for the Anthropic
+    equivalent. The client must be constructed with
+    ``http_options=HttpOptions(timeout=<ms>)`` so the ping is bounded."""
+    _, types_mod = _install_fake_google_genai(monkeypatch)
+    text_part = types_mod.Part.from_text(text="ok")
+    genai_mod, _ = _install_fake_google_genai(
+        monkeypatch, response_parts=[text_part]
+    )
+
+    GoogleProvider(api_key="k").chat([{"role": "user", "content": "hi"}])
+
+    http_options = genai_mod.Client.last_client.http_options
+    assert http_options is not None
+    # Timeout is in milliseconds at the SDK level; bound to something
+    # short enough that a hung network won't freeze the REPL for
+    # minutes but long enough to cover legitimate slow replies.
+    assert 0 < http_options.timeout <= 300_000
+
+
 def test_google_provider_chat_translates_user_messages_to_gemini_contents(monkeypatch):
-    genai_mod, types_mod = _install_fake_google_genai(
-        monkeypatch, reply_text="ok"
+    _, types_mod = _install_fake_google_genai(monkeypatch)
+    text_part = types_mod.Part.from_text(text="ok")
+    genai_mod, _ = _install_fake_google_genai(
+        monkeypatch, response_parts=[text_part]
     )
 
     GoogleProvider(api_key="k").chat(
@@ -528,7 +601,9 @@ def test_google_provider_turn_translates_tool_result_messages_back_to_gemini(mon
     """A full turn — the agent sends back a tool_result from a prior
     tool_use. Translation must surface it as a ``function_response``
     Part on a ``tool``-role Content so Gemini can continue the
-    conversation."""
+    conversation. The function_response carries both the ``name``
+    (looked up from the prior tool_use) AND the synthesised ``id``
+    so parallel calls to the same tool don't cross-wire."""
     _, types_mod = _install_fake_google_genai(monkeypatch)
     text_part = types_mod.Part.from_text(text="done")
     genai_mod, types_mod = _install_fake_google_genai(
@@ -568,13 +643,64 @@ def test_google_provider_turn_translates_tool_result_messages_back_to_gemini(mon
     roles = [c.role for c in contents]
     # user → model → tool
     assert roles == ["user", "model", "tool"]
-    # The function_response part carries the tool name (looked up from
-    # the prior tool_use) and the content verbatim.
+    # The function_response part carries the tool name + id.
     fr_part = contents[2].parts[0]
-    assert fr_part.function_response["name"] == "read_draft"
-    assert fr_part.function_response["response"] == {
+    assert fr_part.function_response.name == "read_draft"
+    assert fr_part.function_response.id == "toolu_1"
+    assert fr_part.function_response.response == {
         "result": "Title: Book\n1 pages."
     }
+
+
+def test_google_provider_turn_preserves_id_for_parallel_same_name_tool_calls(monkeypatch):
+    """If Gemini emits two ``function_call`` parts with the same name
+    in one turn, the agent's two ``tool_result`` blocks must translate
+    back to ``function_response`` parts whose ``id`` fields match the
+    synthesised tool_use ids — otherwise Gemini has no way to tell
+    which call a given result belongs to."""
+    _, types_mod = _install_fake_google_genai(monkeypatch)
+    text_part = types_mod.Part.from_text(text="continuing")
+    genai_mod, types_mod = _install_fake_google_genai(
+        monkeypatch, response_parts=[text_part]
+    )
+
+    messages = [
+        {"role": "user", "content": "check both pages"},
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_A",
+                    "name": "read_draft",
+                    "input": {},
+                },
+                {
+                    "type": "tool_use",
+                    "id": "toolu_B",
+                    "name": "read_draft",
+                    "input": {},
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_A", "content": "A"},
+                {"type": "tool_result", "tool_use_id": "toolu_B", "content": "B"},
+            ],
+        },
+    ]
+
+    GoogleProvider(api_key="k").turn(messages, tools=[])
+
+    contents = genai_mod.Client.last_client.models.last_kwargs["contents"]
+    fr_parts = contents[2].parts
+    # Two function_response parts, distinguishable by their id.
+    ids = [p.function_response.id for p in fr_parts]
+    assert ids == ["toolu_A", "toolu_B"]
+    # Contents match the tool outputs one-to-one.
+    assert [p.function_response.response["result"] for p in fr_parts] == ["A", "B"]
 
 
 def test_google_provider_turn_handles_empty_response(monkeypatch):
@@ -588,3 +714,41 @@ def test_google_provider_turn_handles_empty_response(monkeypatch):
 
     assert response.stop_reason == "end_turn"
     assert response.content == []
+
+
+def test_google_provider_turn_surfaces_non_stop_finish_reason_to_the_user(monkeypatch):
+    """When Gemini ends a turn for a non-STOP reason (SAFETY, MAX_TOKENS,
+    RECITATION) the agent otherwise sees silence. Surface a synthetic
+    text block that names the reason so the REPL isn't mysteriously
+    quiet — the user at least sees *why* the model stopped."""
+    _install_fake_google_genai(
+        monkeypatch, response_parts=[], finish_reason="SAFETY"
+    )
+
+    response = GoogleProvider(api_key="k").turn(
+        [{"role": "user", "content": "bad prompt"}], tools=[]
+    )
+
+    # One synthetic text block naming the finish reason.
+    assert response.stop_reason == "end_turn"
+    text_blocks = [b for b in response.content if b.get("type") == "text"]
+    assert text_blocks, "expected a surfaced warning text block"
+    assert "SAFETY" in text_blocks[0]["text"]
+
+
+def test_google_provider_turn_passes_bounded_timeout_via_http_options(monkeypatch):
+    """``turn()`` gets the same timeout hedge as ``chat()`` — a hung
+    tool-use round is exactly as bad as a hung chat round."""
+    _, types_mod = _install_fake_google_genai(monkeypatch)
+    text_part = types_mod.Part.from_text(text="ok")
+    genai_mod, _ = _install_fake_google_genai(
+        monkeypatch, response_parts=[text_part]
+    )
+
+    GoogleProvider(api_key="k").turn(
+        [{"role": "user", "content": "hi"}], tools=[]
+    )
+
+    http_options = genai_mod.Client.last_client.http_options
+    assert http_options is not None
+    assert 0 < http_options.timeout <= 300_000
