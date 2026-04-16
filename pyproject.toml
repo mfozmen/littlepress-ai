@@ -42,6 +42,10 @@ dependencies = [
   # no-credit-card on-ramp for new users; an optional extra would
   # keep that barrier in place.
   "google-genai>=0.2.0",
+  # OpenAI provider. Bundled for the same reason as Anthropic — many
+  # users already have a GPT key and expect it to Just Work without
+  # chasing an optional extra.
+  "openai>=1.0.0",
   # Stores the Anthropic key in the OS credential manager so the user
   # only pastes it once. Cross-platform (Windows, macOS, Linux).
   "keyring>=24.0.0",
