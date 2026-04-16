@@ -481,16 +481,21 @@ class Repl:
             )
 
     def _dispatch(self, line: str) -> int | None:
-        if line.startswith("/"):
-            return self._dispatch_slash(line)
         # Drag-and-drop convenience: terminals paste a file path when
         # the user drags a file onto the window. If the pasted line
         # resolves to an existing PDF, shortcut to /load instead of
-        # forwarding to the agent. Conservative match (extension +
-        # exists) so chat mentions like "open draft.pdf" aren't
-        # silently swallowed.
+        # forwarding to slash dispatch or the agent.
+        #
+        # This check MUST run before the ``startswith("/")`` slash
+        # check: on Linux / macOS the dragged path is an absolute
+        # path like ``/home/user/draft.pdf`` — a naive slash-first
+        # dispatcher parses it as an unknown slash command. The
+        # classifier is conservative (.pdf extension AND file exists),
+        # so real slash commands like ``/help`` don't match.
         if _looks_like_pdf_path(line):
             return _cmd_load(self, line)
+        if line.startswith("/"):
+            return self._dispatch_slash(line)
         return self._dispatch_chat(line)
 
     def _dispatch_chat(self, line: str) -> int | None:

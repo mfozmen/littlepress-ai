@@ -168,6 +168,48 @@ def test_pdf_path_classifier_survives_os_error(monkeypatch, tmp_path):
     assert repl_mod._looks_like_pdf_path("C:/weird.pdf") is False
 
 
+def test_dispatch_checks_pdf_classifier_before_slash_routing(tmp_path, monkeypatch):
+    """Regression guard: on Linux / macOS a dragged absolute path
+    starts with ``/`` (e.g. ``/home/user/draft.pdf``). If dispatch checks
+    ``line.startswith('/')`` first, the whole path gets parsed as an
+    unknown slash command and the drag-drop feature is dead there.
+    The PDF classifier must be consulted first; it's strict enough
+    (.pdf extension AND file exists) not to shadow real slash commands.
+    """
+    from src import repl as repl_mod
+
+    fake_unix_line = "/home/foo/draft.pdf"
+    # Pretend the classifier sees a real PDF at that path.
+    monkeypatch.setattr(
+        repl_mod, "_looks_like_pdf_path", lambda line: line == fake_unix_line
+    )
+
+    load_calls: list = []
+    slash_calls: list = []
+
+    def fake_load(_repl, args):
+        load_calls.append(args)
+
+    def fake_slash(self, line):
+        slash_calls.append(line)
+
+    monkeypatch.setattr(repl_mod, "_cmd_load", fake_load)
+    monkeypatch.setattr(repl_mod.Repl, "_dispatch_slash", fake_slash)
+
+    buf = io.StringIO()
+    repl = repl_mod.Repl(
+        read_line=_scripted([]),
+        console=Console(file=buf, force_terminal=False, width=100, no_color=True),
+        provider=find("none"),
+        session_root=tmp_path,
+    )
+
+    repl._dispatch(fake_unix_line)  # noqa: SLF001
+
+    assert load_calls == [fake_unix_line]
+    assert slash_calls == []
+
+
 def test_slash_load_still_works_alongside_drag_drop(tmp_path):
     """Explicit /load path should still be accepted (no regression)."""
     pdf = tmp_path / "a.pdf"
