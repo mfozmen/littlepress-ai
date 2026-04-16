@@ -160,6 +160,9 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
   ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
 
 - **release**: 1.1.0 [skip ci]
+  ([`0af9b30`](https://github.com/mfozmen/littlepress-ai/commit/0af9b3031066e4e84eca80847c586c328b749f6a))
+
+- **release**: 1.1.0 [skip ci]
   ([`8fbde37`](https://github.com/mfozmen/littlepress-ai/commit/8fbde37198f247b8b868de2411eac004b75280c4))
 
 - **release**: 1.1.0 [skip ci]
@@ -302,6 +305,19 @@ Maintainer spotted a blank page in the first end-to-end output. Two culprits in 
   requested, so the pre-back-cover pad is redundant.
 
 Listed in Next up at priority #1 — quickest win with user-visible impact.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Plan removing the legacy ``python build.py`` entry point
+  ([`2e2aba2`](https://github.com/mfozmen/littlepress-ai/commit/2e2aba28d741dd810b57b4f2470b98251cd6818a))
+
+User question on PR #37: "who will use this?" about the README's "Usage — direct renderer (still
+  works)" section. Good catch — nobody does. The flow predates the agent pivot; every current user
+  reaches for ``littlepress draft.pdf``. ``build.py``, the README block, and ``tests/test_build.py``
+  are all dead weight.
+
+Added as a cleanup item to Next up so it can ship as its own focused PR (deletes a file, a README
+  section, and probably ``examples/book.json`` + placeholder PNGs).
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
