@@ -11,12 +11,41 @@ from __future__ import annotations
 import argparse
 from importlib.metadata import PackageNotFoundError, version
 
+from prompt_toolkit.completion import Completer, Completion
+
 
 def _resolve_version() -> str:
     try:
         return version("littlepress-ai")
     except PackageNotFoundError:
         return "0.0.0+dev"
+
+
+class SlashCompleter(Completer):
+    """Claude-Code-style ``/`` menu.
+
+    When the user types ``/`` (or starts typing ``/l…``), surface every
+    matching slash command with its description as completion meta-text.
+    Non-slash input is left alone so normal chat doesn't trigger a
+    completion popup.
+    """
+
+    def get_completions(self, document, _complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        # Import lazily so tests / scripts that don't use the CLI
+        # don't have to import the full REPL just to spin up a completer.
+        from src.repl import SLASH_COMMANDS
+
+        prefix = text[1:].lower()
+        for cmd in SLASH_COMMANDS:
+            if cmd.name.lower().startswith(prefix):
+                yield Completion(
+                    text=f"/{cmd.name}",
+                    start_position=-len(text),
+                    display_meta=cmd.description,
+                )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     import getpass
+    import sys
     from pathlib import Path
 
     from rich.console import Console
@@ -42,8 +72,20 @@ def main(argv: list[str] | None = None) -> int:
     from src.providers.validator import validate_key
     from src.repl import Repl
 
-    def read_line() -> str:
-        return input("> ")
+    # prompt_toolkit needs a real TTY on Windows — it probes the console
+    # buffer in its constructor and bails out on piped stdin / pytest
+    # capture. When we're not interactive, fall back to plain input()
+    # so automation (echo 'hi' | littlepress) and tests keep working.
+    if sys.stdin.isatty():
+        from prompt_toolkit import PromptSession
+
+        session = PromptSession(completer=SlashCompleter())
+
+        def read_line() -> str:
+            return session.prompt("> ")
+    else:
+        def read_line() -> str:
+            return input("> ")
 
     def read_secret() -> str:
         return getpass.getpass("")
