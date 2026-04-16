@@ -136,6 +136,71 @@ def test_slash_model_aborted_after_bad_key_keeps_previous_provider():
     assert repl.provider is ollama
 
 
+def test_transient_error_retries_with_the_same_key_on_enter():
+    """TransientValidationError means the key is probably fine — billing
+    got paid, rate-limit expired, 5xx resolved. Pressing Enter at the
+    retry prompt must reuse the SAME key; re-reading the secret would
+    send an empty string to the SDK and crash."""
+    from rich.console import Console
+
+    from src.providers.validator import TransientValidationError
+
+    calls: list[str] = []
+
+    def validate(_spec, key):
+        calls.append(key)
+        if len(calls) == 1:
+            raise TransientValidationError("credit balance too low")
+        # Second time: accept.
+
+    lines_in = iter([""])  # user presses Enter at the retry prompt
+    secrets_in = iter(["sk-ant-real"])  # read only once
+
+    buf = io.StringIO()
+    repl = Repl(
+        read_line=lambda: next(lines_in),
+        console=Console(file=buf, force_terminal=False, width=100, no_color=True),
+        read_secret=lambda: next(secrets_in),
+        provider=find("none"),
+        validate=validate,
+    )
+
+    activated = repl._read_and_validate_key(find("anthropic"))  # noqa: SLF001
+
+    assert activated == "sk-ant-real"
+    # Same key, twice — no empty-string retry.
+    assert calls == ["sk-ant-real", "sk-ant-real"]
+
+
+def test_transient_error_retry_ctrl_d_aborts():
+    """Ctrl-D at the retry prompt cancels; no empty key ever reaches the
+    validator."""
+    from rich.console import Console
+
+    from src.providers.validator import TransientValidationError
+
+    calls: list[str] = []
+
+    def validate(_spec, key):
+        calls.append(key)
+        raise TransientValidationError("timeout")
+
+    def read_ctrl_d():
+        raise EOFError
+
+    buf = io.StringIO()
+    repl = Repl(
+        read_line=read_ctrl_d,
+        console=Console(file=buf, force_terminal=False, width=100, no_color=True),
+        read_secret=lambda: "sk-ant-real",
+        provider=find("none"),
+        validate=validate,
+    )
+
+    assert repl._read_and_validate_key(find("anthropic")) is None  # noqa: SLF001
+    assert calls == ["sk-ant-real"]  # only the initial validate call
+
+
 def test_provider_unavailable_aborts_instead_of_reprompting():
     """Missing SDK is fatal: no amount of retyping the key will fix it,
     so the REPL must NOT loop the key prompt. It aborts this picker run.
