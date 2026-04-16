@@ -41,10 +41,13 @@ def open_in_default_viewer(path: Path) -> None:
         os.startfile(str(path))  # type: ignore[attr-defined]
         return
     opener = "open" if sys.platform == "darwin" else "xdg-open"
+    # start_new_session so the child survives our exit and doesn't
+    # turn into a zombie waiting on the Python process to reap it.
     subprocess.Popen(
         [opener, str(path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 
@@ -411,12 +414,19 @@ def render_book_tool(
 
         try:
             opener(out_path)
+            opened = True
         except Exception:
             # Viewer can't launch (headless env, OS permission) —
             # file is on disk and the path is in the reply.
-            pass
+            opened = False
 
-        message = f"Wrote A5 book to {out_path} and opened it in your viewer."
+        if opened:
+            message = f"Wrote A5 book to {out_path} and opened it in your viewer."
+        else:
+            message = (
+                f"Wrote A5 book to {out_path}. Open it manually — couldn't "
+                "launch a PDF viewer here."
+            )
 
         if impose:
             booklet = out_path.with_name(f"{out_path.stem}_A4_booklet.pdf")
