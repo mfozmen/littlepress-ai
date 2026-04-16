@@ -97,19 +97,24 @@ def collect_input_pdf(source: Path, session_root: Path) -> Path:
     because we can't match what's saved. Copying into a path we control
     decouples the user's file-system hygiene from the project state.
 
-    Name scheme: ``<stem>-<sha256[:8]><suffix>``. The content hash in
+    Name scheme: ``<stem>-<sha256[:16]><suffix>``. The content hash in
     the filename is deterministic (same bytes → same path → shared
     memory, correct: it's the same book) while collision-safe by
     construction (different bytes → different path → separate
     memories). Bare basenames would cross-wire two drafts that happen
     to share a name; that's the regression this helper protects
-    against.
+    against. 16 hex chars (64 bits) makes accidental collision
+    effectively impossible while keeping the filename readable.
 
-    Idempotent: if the destination already exists, we hand it back
-    without touching it (same hash ⇒ same bytes, no need to rewrite).
-    If the source is already inside the input directory — e.g. the
-    user did ``/load .book-gen/input/draft-<hash>.pdf`` — we return
-    it unchanged so the helper never copies a file onto itself.
+    Idempotent by same-hash-same-path: if the destination exists we
+    return it without touching it. The helper assumes this directory
+    is owned by Littlepress — a user hand-editing a file under
+    ``.book-gen/input/`` would make the name-to-content invariant
+    false; that's out of scope and will surface as a mismatched
+    render. If the source is already inside the input directory
+    (e.g. the user did ``/load .book-gen/input/draft-<hash>.pdf``)
+    we return it unchanged so the helper never copies a file onto
+    itself.
     """
     source = Path(source).resolve()
     input_dir = (Path(session_root) / ".book-gen" / "input").resolve()
@@ -119,7 +124,7 @@ def collect_input_pdf(source: Path, session_root: Path) -> Path:
     except ValueError:
         pass
     input_dir.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:8]
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
     destination = input_dir / f"{source.stem}-{digest}{source.suffix}"
     if destination.is_file():
         return destination

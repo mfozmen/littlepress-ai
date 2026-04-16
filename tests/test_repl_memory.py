@@ -184,6 +184,68 @@ def test_relaunch_restores_draft_from_memory(tmp_path, monkeypatch):
     assert captured["title"] == "Remembered Book"
 
 
+def test_memory_from_before_collect_input_migrates_on_first_relaunch(
+    tmp_path, monkeypatch
+):
+    """Users with a saved session from before the collect_input_pdf
+    feature have ``source_pdf`` = the original arg path; the first
+    relaunch after upgrade must not silently throw their session
+    away. On lookup miss we fall back to the pre-collection path and,
+    on a hit, migrate the stored source_pdf to the new in-repo path
+    so subsequent launches go through the fast path."""
+    from src import cli, memory, session as session_mod
+    from src.draft import Draft, DraftPage
+
+    pdf = _write_pdf(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    session_mod.save(tmp_path, session_mod.Session(provider="none"))
+
+    # Hand-craft a pre-PR memory file: source_pdf pointing at the
+    # original (not the collected copy).
+    legacy = Draft(
+        source_pdf=pdf.resolve(),
+        title="Legacy Title",
+        pages=[DraftPage(text="legacy")],
+    )
+    memory.save_draft(tmp_path, legacy)
+
+    # Sanity: memory exists and keys off the legacy path.
+    saved = memory.load_draft(tmp_path, expected_source=pdf)
+    assert saved is not None and saved.title == "Legacy Title"
+
+    # First relaunch after upgrade — the CLI now collects the PDF
+    # into .book-gen/input/, so expected_source is the hashed copy,
+    # which won't match the legacy record by path.
+    captured = {}
+    from src import repl as repl_mod
+
+    def spy(self):
+        captured["title"] = self._draft.title if self._draft else None
+        captured["source"] = self._draft.source_pdf if self._draft else None
+        raise SystemExit(0)
+
+    monkeypatch.setattr(repl_mod.Repl, "run", spy)
+    monkeypatch.setattr(
+        "builtins.input", lambda _p="": (_ for _ in ()).throw(EOFError)
+    )
+
+    try:
+        cli.main([str(pdf)])
+    except SystemExit:
+        pass
+
+    # Legacy memory was found via the fallback path.
+    assert captured["title"] == "Legacy Title"
+    # And migrated: source_pdf now points at the in-repo collected copy.
+    input_dir = tmp_path / ".book-gen" / "input"
+    assert captured["source"].parent == input_dir
+
+    # Re-save on migration so subsequent launches skip the fallback.
+    persisted = memory.load_draft(tmp_path, expected_source=captured["source"])
+    assert persisted is not None
+    assert persisted.source_pdf.parent == input_dir
+
+
 def test_memory_survives_the_original_pdf_being_moved_or_deleted(
     tmp_path, monkeypatch
 ):
