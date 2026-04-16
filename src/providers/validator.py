@@ -109,6 +109,51 @@ def _check_anthropic(spec: ProviderSpec, api_key: str) -> None:
 _DEFAULT_VALIDATION_MODEL = "claude-haiku-4-5-20251001"
 
 
+def _check_google(spec: ProviderSpec, api_key: str) -> None:
+    """Ping Gemini with the smallest possible ``generate_content`` call.
+
+    Gen AI SDK raises ``google.api_core.exceptions.PermissionDenied``
+    (or ``google.genai.errors.ClientError`` with a 401/403) for auth
+    failures, and other error classes for billing / rate / server
+    issues. We treat auth-like errors as KeyValidationError and
+    everything else as transient — same contract as the Anthropic
+    checker.
+    """
+    try:
+        from google import genai  # type: ignore[import-not-found]
+    except ImportError as e:
+        raise ProviderUnavailable(
+            "The 'google-genai' SDK is missing from this install. Try: "
+            "pip install --force-reinstall littlepress-ai"
+        ) from e
+
+    try:
+        client = genai.Client(api_key=api_key)
+        client.models.generate_content(
+            model=spec.validation_model or _GOOGLE_DEFAULT_VALIDATION_MODEL,
+            contents="ping",
+        )
+    except Exception as e:  # noqa: BLE001 — classify by message heuristics
+        # The SDK's exception hierarchy varies (google.api_core vs
+        # google.genai.errors). Classify by the error message / HTTP
+        # code instead of importing a specific class; that keeps the
+        # checker robust across SDK versions.
+        msg = str(e).lower()
+        status = getattr(e, "status_code", None) or getattr(e, "code", None)
+        if (
+            "api key" in msg
+            or "unauthenticated" in msg
+            or "permission" in msg
+            or status in (401, 403)
+        ):
+            raise KeyValidationError(f"Google rejected the key: {e}") from e
+        raise TransientValidationError(f"Gemini call failed: {e}") from e
+
+
+_GOOGLE_DEFAULT_VALIDATION_MODEL = "gemini-2.5-flash"
+
+
 _CHECKERS = {
     "anthropic": _check_anthropic,
+    "google": _check_google,
 }
