@@ -554,6 +554,104 @@ def test_render_book_surfaces_build_failure(tmp_path, monkeypatch):
     assert "disk full" in result or "failed" in result.lower()
 
 
+def test_render_book_returns_absolute_paths_in_message(tmp_path):
+    """The agent's reply must include the absolute output paths so the
+    user knows exactly where to look — the first end-to-end test had
+    the user hunting through the filesystem for the files."""
+    draft = _two_page_draft(tmp_path)
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    result = tool.handler({"impose": True})
+
+    a5 = (tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf").resolve()
+    booklet = a5.with_name(f"{a5.stem}_A4_booklet.pdf")
+    assert str(a5) in result
+    assert str(booklet) in result
+
+
+def test_render_book_opens_the_a5_in_the_default_viewer(tmp_path):
+    """After a successful render the A5 PDF is handed off to the
+    platform's default PDF viewer so the user doesn't have to hunt for
+    the file manually."""
+    draft = _two_page_draft(tmp_path)
+    opened: list[Path] = []
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=lambda p: opened.append(Path(p)),
+    )
+
+    tool.handler({})
+
+    a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
+    assert len(opened) == 1
+    assert opened[0].resolve() == a5.resolve()
+
+
+def test_render_book_only_opens_the_a5_not_the_booklet(tmp_path):
+    """The booklet is a print artefact — don't pop it up in the viewer
+    when the user asks for it; the A5 is the reading copy."""
+    draft = _two_page_draft(tmp_path)
+    opened: list[Path] = []
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=lambda p: opened.append(Path(p)),
+    )
+
+    tool.handler({"impose": True})
+
+    a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
+    assert [p.resolve() for p in opened] == [a5.resolve()]
+
+
+def test_render_book_viewer_failure_is_non_fatal(tmp_path):
+    """If the OS viewer can't be launched (headless env, permission
+    error), the render still reports success — the files are on disk."""
+    draft = _two_page_draft(tmp_path)
+
+    def boom(_p):
+        raise RuntimeError("no viewer here")
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=boom,
+    )
+
+    result = tool.handler({})
+
+    assert "Wrote A5 book" in result
+    assert (tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf").is_file()
+
+
+def test_render_book_does_not_call_opener_when_render_fails(tmp_path, monkeypatch):
+    """If build_pdf errors out, the viewer is never invoked — there's
+    no file to open."""
+    draft = _two_page_draft(tmp_path)
+    opened: list = []
+
+    def boom(_book, _out):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("src.agent_tools.build_pdf", boom)
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=lambda p: opened.append(p),
+    )
+
+    tool.handler({})
+
+    assert opened == []
+
+
 def test_render_book_impose_failure_keeps_a5(tmp_path, monkeypatch):
     draft = _two_page_draft(tmp_path)
 

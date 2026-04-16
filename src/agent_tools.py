@@ -13,7 +13,10 @@ beyond mechanical substring substitutions.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -22,6 +25,27 @@ from src.builder import build_pdf
 from src.draft import Draft, slugify, to_book
 from src.imposition import impose_a5_to_a4
 from src.schema import VALID_LAYOUTS
+
+
+def open_in_default_viewer(path: Path) -> None:
+    """Hand ``path`` to the operating system's default handler.
+
+    Windows uses the ``start`` verb via ``os.startfile``; macOS calls
+    ``open``; everything else tries ``xdg-open``. All three are
+    fire-and-forget — no exception means the OS has accepted the
+    launch request, but there's no guarantee the viewer actually
+    opened the file (the caller treats any raise as "couldn't open",
+    silently).
+    """
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen(
+        [opener, str(path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 _METADATA_FIELDS = {"title", "author", "cover_subtitle", "back_cover_text"}
@@ -344,6 +368,7 @@ def choose_layout_tool(get_draft: Callable[[], Draft | None]) -> Tool:
 def render_book_tool(
     get_draft: Callable[[], Draft | None],
     get_session_root: Callable[[], Path],
+    open_file: Callable[[Path], None] | None = None,
 ) -> Tool:
     """Tool: build the finished A5 PDF (and optionally the A4 booklet).
 
@@ -352,7 +377,17 @@ def render_book_tool(
     the existing gitignore rule covers it. If ``impose=True`` the tool
     also writes ``<slug>_A4_booklet.pdf`` alongside; a booklet failure
     keeps the A5 intact and surfaces the error.
+
+    After a successful A5 render the tool hands the file to
+    ``open_file`` so the user's PDF viewer pops up automatically —
+    without that step the user had to hunt through the filesystem to
+    find the rendered book. The booklet is a print artefact and is
+    NOT opened. Viewer failures are swallowed (the file is on disk;
+    surfacing a "couldn't open viewer" in the agent reply would be
+    noise). Defaults to :func:`open_in_default_viewer` when the caller
+    doesn't inject its own opener (tests do).
     """
+    opener = open_file if open_file is not None else open_in_default_viewer
 
     def handler(input_: dict) -> str:
         draft = get_draft()
@@ -366,7 +401,7 @@ def render_book_tool(
 
         impose = bool(input_.get("impose", False))
         source_dir = Path(get_session_root()) / ".book-gen"
-        out_path = source_dir / "output" / f"{slugify(draft.title)}.pdf"
+        out_path = (source_dir / "output" / f"{slugify(draft.title)}.pdf").resolve()
 
         try:
             book = to_book(draft, source_dir)
@@ -374,7 +409,14 @@ def render_book_tool(
         except Exception as e:
             return f"Render failed: {e}"
 
-        message = f"Wrote A5 book to {out_path}."
+        try:
+            opener(out_path)
+        except Exception:
+            # Viewer can't launch (headless env, OS permission) —
+            # file is on disk and the path is in the reply.
+            pass
+
+        message = f"Wrote A5 book to {out_path} and opened it in your viewer."
 
         if impose:
             booklet = out_path.with_name(f"{out_path.stem}_A4_booklet.pdf")
