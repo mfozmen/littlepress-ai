@@ -348,6 +348,13 @@ class Repl:
 
         Returns ``None`` on EOF so the caller can treat that as abort.
         If no validator was injected the key is accepted as-is.
+
+        Outer loop: one secret read per iteration — used when the key
+        itself was rejected and the user has to paste a new one.
+        Inner loop (``_retry_validation``): retries with the *same* key
+        on transient errors (billing, rate limit, 5xx) — re-reading the
+        secret would ask the user to paste again for no reason, and an
+        Enter-pressed "retry" would send an empty string to the SDK.
         """
         while True:
             try:
@@ -356,31 +363,52 @@ class Repl:
                 return None
             if self._validate is None:
                 return api_key
+            outcome = self._retry_validation(spec, api_key)
+            if outcome == "ok":
+                return api_key
+            if outcome == "abort":
+                return None
+            # outcome == "bad_key": fall through and read a new secret.
+
+    def _retry_validation(self, spec: ProviderSpec, api_key: str) -> str:
+        """Validate ``api_key`` and, only for transient errors, let the
+        user retry without re-entering the secret.
+
+        Returns:
+            ``"ok"`` — key passed.
+            ``"bad_key"`` — key was rejected; caller should read a new one.
+            ``"abort"`` — provider unavailable, or user Ctrl-D'd the retry.
+        """
+        while True:
             try:
                 self._validate(spec, api_key)
+                return "ok"
             except ProviderUnavailable as e:
                 # SDK missing, broken install, etc. Re-prompting won't help.
                 self._console.print(f"[red]{e}[/red]")
-                return None
+                return "abort"
             except KeyValidationError as e:
                 self._console.print(f"[red]{e}[/red]")
                 self._console.print(
                     f"Enter API key for {spec.display_name} again:"
                 )
-                continue
+                return "bad_key"
             except TransientValidationError as e:
                 # Key is probably fine but the call failed (billing / rate
-                # / 5xx / network). Re-prompting the same key will hit the
-                # same error — surface the message and let the user either
-                # try again (after fixing the underlying cause) or Ctrl-D
-                # out.
+                # limit / 5xx / network). Re-entering the same key is
+                # pointless; re-pinging after the underlying issue clears
+                # might succeed. Enter = retry with same key, Ctrl-D =
+                # bail out of this activation.
                 self._console.print(f"[yellow]{e}[/yellow]")
                 self._console.print(
-                    f"Press Enter to retry, or Ctrl-D to cancel and come "
-                    f"back for {spec.display_name} later:"
+                    f"Press Enter to retry with the same key, or Ctrl-D "
+                    f"to cancel and come back for {spec.display_name} later:"
                 )
-                continue
-            return api_key
+                try:
+                    self._read()
+                except EOFError:
+                    return "abort"
+                # Loop and re-validate with the same api_key.
 
     def _read_spec_choice(self) -> ProviderSpec | None:
         while True:
