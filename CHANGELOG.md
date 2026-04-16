@@ -160,6 +160,9 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
   ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
 
 - **release**: 1.1.0 [skip ci]
+  ([`748e0b5`](https://github.com/mfozmen/littlepress-ai/commit/748e0b54b4a6e0d5314d78a6e5c4d618b36d45d9))
+
+- **release**: 1.1.0 [skip ci]
   ([`9cc8709`](https://github.com/mfozmen/littlepress-ai/commit/9cc87096b4861db28f97bfd89b646f346d2d53da))
 
 - **release**: 1.1.0 [skip ci]
@@ -388,6 +391,27 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
   import binding. Gets src/agent_tools.py back to 100% coverage.
 
 ---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- **agent**: Propose_layouts tool for whole-book rhythm approval
+  ([#33](https://github.com/mfozmen/littlepress-ai/pull/33),
+  [`b0eee37`](https://github.com/mfozmen/littlepress-ai/commit/b0eee3780099b089ed1d35f26491536b701f4b4e))
+
+Per-page choose_layout is awkward for the "settle on a rhythm" phase: the agent has to ask the user
+  to approve N individual decisions when what they really want to see is the full rhythm on one page
+  and say yes or no to the whole thing.
+
+propose_layouts takes every page in one call, validates the batch as a unit (out-of-range,
+  duplicates, invalid layout name, image-layout on an imageless page — all rejected before prompting
+  so we never half-apply), renders a readable summary, and flips the whole book on a single y/n. If
+  the user declines, nothing changes and the agent can adjust or fall back to choose_layout for
+  surgical tweaks.
+
+Tool registered in Repl._build_agent alongside the per-page tool; both stay available so the agent
+  can pick the right one per phase.
 
 Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
