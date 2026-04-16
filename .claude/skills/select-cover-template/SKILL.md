@@ -27,15 +27,16 @@ Before deciding, look at:
 
 Apply in order. First match wins.
 
-1. **No cover drawing** (`draft.cover_image is None` or the page candidate has no image) → **`poster`**. Type-only is the only option that won't leave an empty hole where the drawing should be.
-2. **Very long title** (> 32 visible characters at preferred size — see "title fit note" below) combined with a busy drawing → **`framed`**. Full-bleed + long title would force the type small enough to disappear against busy artwork; framing gives both the drawing and the title their own breathing room.
-3. **Dramatic illustration that fills the page naturally** (landscape-ish, `ar ≥ 1.1`, or portrait-ish with high busyness) → **`full-bleed`**. The drawing *is* the cover; typography rides over it.
-4. **Quiet or small-figure illustration** (lots of negative space in the drawing, a centred single figure, or `ar` well off from 1) → **`framed`**. Letterboxing gives the subject a stage.
-5. **Default** → **`full-bleed`**. If you can't distinguish clearly, the most visually assertive picture-book cover is the safe choice.
+1. **No cover drawing** (`draft.cover_image is None` or the page candidate has no image) → **`poster`**. Type-only is the only option that won't leave an empty hole where the drawing should be. **But first**, if the title is long enough that poster would shrink it below `COVER_TITLE_MIN_READABLE` (~14 pt), the cover is a judgment call: either trim the title, wrap it, or ask the user whether they want to supply a drawing after all.
+2. **A cover drawing exists** → never pick `poster`, even if the drawing is rough. Ignoring the child's artwork contradicts preserve-child-voice. Pick between `framed` and `full-bleed` instead (continue to rules 3-5).
+3. **Very long title** (> 32 visible characters at preferred size — see "title fit note" below) combined with a busy drawing → **`framed`**. Full-bleed + long title would force the type small enough to disappear against busy artwork; framing gives both the drawing and the title their own breathing room.
+4. **Dramatic illustration that fills the page naturally** (landscape-ish, `ar ≥ 1.1`, or portrait-ish with high busyness) → **`full-bleed`**. The drawing *is* the cover; typography rides over it.
+5. **Quiet or small-figure illustration** (lots of negative space in the drawing, a centred single figure, or `ar` well off from 1) → **`framed`**. Letterboxing gives the subject a stage.
+6. **Default** → **`full-bleed`**. If you can't distinguish clearly, the most visually assertive picture-book cover is the safe choice.
 
 ### Title fit note
 
-The renderer's `_fit_title_size` shrinks the title font when it overflows the page width, down to a 16-pt floor. That protects against clipping but doesn't protect against *visual harmony* — a 16-pt title on a full-bleed cover over a busy illustration reads like a footnote. Use the rough character counts above as early-warning signals to pick `framed` (or `poster` if there's no illustration worth bleeding).
+The renderer's `_fit_title_size` shrinks the title font proportionally whenever it overflows the page width — no hard floor. That guarantees the title never clips past the page edge, but it doesn't guarantee *visual harmony*: a 10-pt title on a full-bleed cover over a busy illustration reads like a footnote. Treat `COVER_TITLE_MIN_READABLE` (~14 pt, in `src/config.py`) as the advisory threshold. If a template would drive the title below that size, either pick a different template, shorten the title with the user, or flag it for future word-wrapping (not implemented yet).
 
 ### Style rules that apply to every template
 

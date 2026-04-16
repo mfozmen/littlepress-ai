@@ -298,25 +298,35 @@ def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
                 f"Invalid style '{style}'. Valid styles: "
                 f"{sorted(VALID_COVER_STYLES)}."
             )
+        # If ``page`` was provided, validate it regardless of style —
+        # an out-of-range number is a mistake whether we use it or
+        # not. Silent acceptance would hide typos that matter the
+        # moment the agent switches away from poster.
+        page_n_raw = input_.get("page")
+        if page_n_raw is not None:
+            page_n = int(page_n_raw)
+            if page_n < 1 or page_n > len(draft.pages):
+                return (
+                    f"Page {page_n} is out of range — the draft has "
+                    f"{len(draft.pages)} pages."
+                )
+
         if style == "poster":
             # Type-only template — no drawing needed. Keep the existing
             # cover_image alone so a previous full-bleed choice isn't
             # silently discarded if the agent flips back later.
             draft.cover_style = "poster"
-            return "Cover set to 'poster' style (type-only — no drawing used)."
+            msg = "Cover set to 'poster' style (type-only — no drawing used)."
+            if page_n_raw is not None:
+                msg += f" (The 'page' argument was ignored for this style.)"
+            return msg
 
-        page_n_raw = input_.get("page")
         if page_n_raw is None:
             return (
                 "page is required unless style='poster'. Name the page "
                 "whose drawing should be the cover."
             )
         page_n = int(page_n_raw)
-        if page_n < 1 or page_n > len(draft.pages):
-            return (
-                f"Page {page_n} is out of range — the draft has "
-                f"{len(draft.pages)} pages."
-            )
         page = draft.pages[page_n - 1]
         if page.image is None:
             return f"Page {page_n} has no drawing — can't use it as the cover."

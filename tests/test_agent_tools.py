@@ -485,6 +485,24 @@ def test_set_cover_requires_page_when_style_needs_an_image():
     assert "page is required" in result.lower() or "poster" in result.lower()
 
 
+def test_set_cover_poster_with_invalid_page_arg_still_surfaces_the_error():
+    """Even when ``style='poster'`` ignores the drawing, a bogus
+    ``page`` argument shouldn't be accepted silently. Bad inputs are
+    rejected — don't let the poster branch hide a typo."""
+    draft = Draft(
+        source_pdf=Path("x.pdf"),
+        title="T",
+        pages=[DraftPage(text="p1", image=Path("a.png"))],
+    )
+    tool = set_cover_tool(get_draft=lambda: draft)
+
+    result = tool.handler({"page": 99, "style": "poster"})
+
+    # Nothing committed when the input is invalid.
+    assert draft.cover_style == "full-bleed"
+    assert "99" in result or "out of" in result.lower()
+
+
 def test_set_cover_allows_poster_without_a_page_image():
     """``poster`` is the type-only template — the whole point is that
     it renders without a cover drawing. Requiring a page image would

@@ -195,6 +195,82 @@ def test_cover_full_bleed_subtitle_clears_title_descenders(
     )
 
 
+def test_poster_title_never_overflows_page_even_at_long_length(tmp_path, monkeypatch):
+    """_fit_title_size must shrink long titles ALL the way down rather
+    than clipping at a floor that's still wider than the page. A 40-
+    char title starting from ``COVER_POSTER_TITLE_SIZE`` used to settle
+    at an 18-pt floor where the text still ran off the page. The floor
+    now only advises the skill; the render-path's shrink guarantees fit."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfgen.canvas import Canvas
+
+    from src.config import FONT_BOLD, MARGIN, PAGE_W
+
+    long_title = "The Extraordinarily Long Book Name That Overflows"
+    # Sanity: at the poster preferred size the title really is too wide.
+    from src.config import COVER_POSTER_TITLE_SIZE
+    assert (
+        pdfmetrics.stringWidth(long_title, FONT_BOLD, COVER_POSTER_TITLE_SIZE)
+        > PAGE_W - 2 * MARGIN
+    )
+
+    captured: list[tuple[str, float]] = []
+    orig_setfont = Canvas.setFont
+    orig_drawstring = Canvas.drawString
+    current_size: list[float] = [0]
+
+    def spy_setfont(self, name, size, *a, **kw):
+        current_size[0] = size
+        return orig_setfont(self, name, size, *a, **kw)
+
+    def spy_draw(self, x, y, text, *a, **kw):
+        captured.append((text, current_size[0]))
+        return orig_drawstring(self, x, y, text, *a, **kw)
+
+    monkeypatch.setattr(Canvas, "setFont", spy_setfont)
+    monkeypatch.setattr(Canvas, "drawString", spy_draw)
+
+    book = Book(
+        title=long_title,
+        cover=Cover(image=None, style="poster"),
+        back_cover=BackCover(),
+        pages=[Page(text="x", image=None, layout="text-only")],
+        source_dir=tmp_path,
+    )
+    build_pdf(book, tmp_path / "poster.pdf")
+
+    # The title drawString call happened at some font size; at THAT size
+    # the title must fit the page's inner width.
+    title_calls = [(t, sz) for t, sz in captured if t == long_title]
+    assert title_calls, "poster should have drawn the title"
+    _, used_size = title_calls[0]
+    rendered_w = pdfmetrics.stringWidth(long_title, FONT_BOLD, used_size)
+    assert rendered_w <= PAGE_W - 2 * MARGIN + 0.5, (
+        f"Title rendered at {used_size:.1f}pt is {rendered_w:.1f}pt wide, "
+        f"but usable width is {PAGE_W - 2 * MARGIN:.1f}pt — title clips."
+    )
+
+
+def test_draw_cover_raises_on_unknown_style(tmp_path):
+    """The ``Book → draw_cover`` contract is that ``cover.style`` has
+    been validated upstream (``load_book`` or ``to_book``). If a Book
+    is constructed directly with a bogus style, the dispatcher must
+    surface it rather than silently falling back to full-bleed."""
+    import pytest as _pytest
+
+    img = _cover_image(tmp_path)
+    book = Book(
+        title="T",
+        cover=Cover(image=img.name, style="bogus-style"),
+        back_cover=BackCover(),
+        pages=[Page(text="x", image=None, layout="text-only")],
+        source_dir=tmp_path,
+    )
+
+    with _pytest.raises(ValueError, match="bogus-style"):
+        build_pdf(book, tmp_path / "out.pdf")
+
+
 def test_cover_title_shrinks_to_fit_page_width(tmp_path):
     """At 34pt DejaVu Sans Bold a 25-char English title overshoots A5
     width (≈420pt). The renderer must shrink the title to fit rather

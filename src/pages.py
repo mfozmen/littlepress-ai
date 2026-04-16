@@ -75,15 +75,20 @@ def _draw_image_fit(c: Canvas, path: Path, x: float, y: float, w: float, h: floa
 def _fit_title_size(text: str, font: str, preferred: float, max_width: float) -> float:
     """Return a font size that keeps ``text`` within ``max_width``.
 
-    Shrinks from ``preferred`` proportional to how much the text
-    overshoots. A hard floor of 18pt keeps long titles legible — below
-    that the renderer just clips; wrapping the cover title onto two
-    lines would need a separate layout branch we don't have yet.
+    Shrinks ``preferred`` proportionally to whatever size the text
+    actually needs. Returning ``preferred * max_width / width``
+    guarantees fit: at that size the rendered width equals
+    ``max_width``. No floor — a floor can still clip the page edge
+    (the previous 18-pt floor did so on 40-char titles). If the
+    shrink produces an unreadably small size, the cure is to pick a
+    different template (see select-cover-template skill's
+    ``COVER_TITLE_MIN_READABLE`` advisory), not to let the text run
+    off the page.
     """
     width = pdfmetrics.stringWidth(text, font, preferred)
     if width <= max_width:
         return preferred
-    return max(preferred * max_width / width, 18)
+    return preferred * max_width / width
 
 
 def _draw_cover_full_bleed(c: Canvas, book: Book) -> None:
@@ -214,20 +219,25 @@ def _draw_cover_poster(c: Canvas, book: Book) -> None:
 def draw_cover(c: Canvas, book: Book) -> None:
     """Dispatch to the renderer for ``book.cover.style``.
 
-    Invariant: ``book.cover.style`` is guaranteed to be in
-    ``VALID_COVER_STYLES`` by the time we get here — both
-    ``schema.load_book`` and ``draft.to_book`` raise on unknown values
-    — so this function doesn't re-validate. If that ever changes, add
-    the check back rather than relying on the ``else`` branch as a
-    silent fallback.
+    The pipeline validates ``cover.style`` upstream (both
+    ``schema.load_book`` and ``draft.to_book`` raise on unknown
+    values). If something bypasses those (e.g. a ``Book`` constructed
+    directly with a typo) we raise here instead of silently falling
+    back to full-bleed — a wrong-cover render is worse than a loud
+    failure the caller can fix.
     """
     style = book.cover.style
-    if style == "framed":
+    if style == "full-bleed":
+        _draw_cover_full_bleed(c, book)
+    elif style == "framed":
         _draw_cover_framed(c, book)
     elif style == "poster":
         _draw_cover_poster(c, book)
     else:
-        _draw_cover_full_bleed(c, book)
+        raise ValueError(
+            f"Unknown cover style '{style}'. Valid styles: "
+            f"{sorted(VALID_COVER_STYLES)}."
+        )
     c.showPage()
 
 
