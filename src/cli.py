@@ -116,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
         if not pdf_path.is_file():
             print(f"Error: file not found: {pdf_path}")
             return 1
+        # Mirror the PDF into .book-gen/input/ first so the memory
+        # lookup below keys off the in-repo path (same key as last
+        # time). Running with either the original arg or the copied
+        # path lands on the saved session.
+        pdf_path = draft_mod.collect_input_pdf(pdf_path, session_root)
         # Prefer a saved draft for this PDF if we have one — otherwise
         # the agent would re-ask every decision the user already made.
         restored = memory_mod.load_draft(

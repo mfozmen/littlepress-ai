@@ -12,6 +12,7 @@ ingestion path just copies what ``src/pdf_ingest`` returned.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -84,6 +85,46 @@ def slugify(text: str) -> str:
     return (
         "".join(ch for ch in cleaned if ch.isalnum() or ch in "_-").lower() or "book"
     )
+
+
+def collect_input_pdf(source: Path, session_root: Path) -> Path:
+    """Mirror ``source`` into ``<session_root>/.book-gen/input/`` and
+    return the in-repo path.
+
+    Why: the draft's ``source_pdf`` and persisted memory both key off
+    the PDF's absolute path. If the original lives outside the project
+    (Downloads, Desktop, …) a later move or ``rm`` breaks the session
+    because we can't match what's saved. Copying into a path we control
+    decouples the user's file-system hygiene from the project state.
+
+    Name scheme: ``<stem>-<sha256[:8]><suffix>``. The content hash in
+    the filename is deterministic (same bytes → same path → shared
+    memory, correct: it's the same book) while collision-safe by
+    construction (different bytes → different path → separate
+    memories). Bare basenames would cross-wire two drafts that happen
+    to share a name; that's the regression this helper protects
+    against.
+
+    Idempotent: if the destination already exists, we hand it back
+    without touching it (same hash ⇒ same bytes, no need to rewrite).
+    If the source is already inside the input directory — e.g. the
+    user did ``/load .book-gen/input/draft-<hash>.pdf`` — we return
+    it unchanged so the helper never copies a file onto itself.
+    """
+    source = Path(source).resolve()
+    input_dir = (Path(session_root) / ".book-gen" / "input").resolve()
+    try:
+        source.relative_to(input_dir)
+        return source
+    except ValueError:
+        pass
+    input_dir.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:8]
+    destination = input_dir / f"{source.stem}-{digest}{source.suffix}"
+    if destination.is_file():
+        return destination
+    shutil.copyfile(source, destination)
+    return destination
 
 
 def atomic_copy(src: Path, dst: Path) -> None:
