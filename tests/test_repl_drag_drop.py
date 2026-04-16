@@ -151,6 +151,23 @@ def test_home_expansion_in_drag_drop_path(tmp_path, monkeypatch):
     assert repl.draft is not None
 
 
+def test_pdf_path_classifier_survives_os_error(monkeypatch, tmp_path):
+    """Path construction can OSError on weird inputs (Windows device
+    names, encoding issues). The classifier must return False rather
+    than crash the dispatch."""
+    from src import repl as repl_mod
+
+    def boom(*_a, **_kw):
+        raise OSError("bad path")
+
+    # Patch Path.expanduser so the is_file() call blows up.
+    monkeypatch.setattr(repl_mod.Path, "expanduser", boom)
+
+    # The line ends with .pdf (extension check passes) — OSError on
+    # the exists() check must be swallowed.
+    assert repl_mod._looks_like_pdf_path("C:/weird.pdf") is False
+
+
 def test_slash_load_still_works_alongside_drag_drop(tmp_path):
     """Explicit /load path should still be accepted (no regression)."""
     pdf = tmp_path / "a.pdf"
