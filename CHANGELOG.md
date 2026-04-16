@@ -160,6 +160,9 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
   ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
 
 - **release**: 1.1.0 [skip ci]
+  ([`999d89c`](https://github.com/mfozmen/littlepress-ai/commit/999d89ce1ab9db043a1322190cb08fbcb8a06358))
+
+- **release**: 1.1.0 [skip ci]
   ([`b991923`](https://github.com/mfozmen/littlepress-ai/commit/b991923bcf065147a1d0e0cc3bee04b5b1fc69b9))
 
 - **release**: 1.1.0 [skip ci]
@@ -261,6 +264,48 @@ Listed in Next up at priority #1 — quickest win with user-visible impact.
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 ### Features
+
+- **agent**: Auto-open the rendered A5 and surface absolute paths
+  ([#29](https://github.com/mfozmen/littlepress-ai/pull/29),
+  [`d3767c3`](https://github.com/mfozmen/littlepress-ai/commit/d3767c3c37ad9f3d436369db908cbb8de45e1e10))
+
+* feat(agent): auto-open the rendered A5 and surface absolute paths
+
+Post-test feedback: after render_book the user had to hunt through the filesystem for the output.
+  Rendered book opens itself now.
+
+- render_book_tool hands the finished A5 PDF to the platform's default PDF viewer via a new
+  open_in_default_viewer helper (os.startfile on Windows, `open` on macOS, `xdg-open` elsewhere).
+  Fire-and-forget; a viewer failure is silently swallowed because the file is on disk and the agent
+  reply already includes the path. - The A4 booklet is a print artefact — the tool does NOT open it.
+  Only the A5 reading copy pops up. - out_path is now resolved to an absolute path before the reply,
+  so the agent always tells the user the full location, not a cwd-relative one. - Injectable
+  open_file parameter on render_book_tool so tests can assert on calls without spawning real
+  viewers, and so a future "no auto-open" mode is one-line away. - tests/conftest.py auto-mocks
+  open_in_default_viewer for the whole suite — a full pytest run used to spawn a PDF viewer per
+  integration render.
+
+Five new tests pin: absolute paths in message, A5 opens, booklet does not, viewer failure is
+  non-fatal, opener is not called when build_pdf errors out. 306 tests green; src/agent_tools.py at
+  97% (the only gap is the platform-dispatch helper itself, trivial fire-and-forget dispatch).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(agent-tools): address PR review for auto-open
+
+- Detach the xdg-open/open child with start_new_session=True so it doesn't become a zombie waiting
+  on the Python process to reap it. - Only claim "opened in your viewer" when the opener actually
+  succeeded; otherwise tell the user to open the file manually so the message never lies about what
+  happened. - README Status line now mentions the auto-open behaviour (and that the booklet
+  intentionally doesn't pop up — it's a print artefact). - Cover the platform dispatch in
+  open_in_default_viewer directly, working around the conftest auto-mock via a module-load-time
+  import binding. Gets src/agent_tools.py back to 100% coverage.
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Auto-load PDF when its path is dragged onto the terminal
   ([#25](https://github.com/mfozmen/littlepress-ai/pull/25),
