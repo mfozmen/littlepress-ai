@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from src import agent_tools
 from src.agent_tools import (
     choose_layout_tool,
+    open_in_default_viewer,
     propose_typo_fix_tool,
     read_draft_tool,
     render_book_tool,
@@ -13,6 +15,15 @@ from src.agent_tools import (
     set_metadata_tool,
 )
 from src.draft import Draft, DraftPage
+
+# The conftest ``_no_real_pdf_viewer`` fixture replaces
+# ``agent_tools.open_in_default_viewer`` with a no-op for every test, to
+# stop a full suite run from spawning a PDF viewer window per render.
+# The ``from src.agent_tools import open_in_default_viewer`` above binds
+# the *original* function object at import time, so tests that want to
+# exercise the real platform dispatch can use this local alias and
+# reach it through the fixture.
+_real_open_in_default_viewer = open_in_default_viewer
 
 
 def test_read_draft_without_loaded_draft_tells_agent_to_ask():
@@ -554,6 +565,109 @@ def test_render_book_surfaces_build_failure(tmp_path, monkeypatch):
     assert "disk full" in result or "failed" in result.lower()
 
 
+def test_render_book_returns_absolute_paths_in_message(tmp_path):
+    """The agent's reply must include the absolute output paths so the
+    user knows exactly where to look — the first end-to-end test had
+    the user hunting through the filesystem for the files."""
+    draft = _two_page_draft(tmp_path)
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    result = tool.handler({"impose": True})
+
+    a5 = (tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf").resolve()
+    booklet = a5.with_name(f"{a5.stem}_A4_booklet.pdf")
+    assert str(a5) in result
+    assert str(booklet) in result
+
+
+def test_render_book_opens_the_a5_in_the_default_viewer(tmp_path):
+    """After a successful render the A5 PDF is handed off to the
+    platform's default PDF viewer so the user doesn't have to hunt for
+    the file manually."""
+    draft = _two_page_draft(tmp_path)
+    opened: list[Path] = []
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=lambda p: opened.append(Path(p)),
+    )
+
+    tool.handler({})
+
+    a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
+    assert len(opened) == 1
+    assert opened[0].resolve() == a5.resolve()
+
+
+def test_render_book_only_opens_the_a5_not_the_booklet(tmp_path):
+    """The booklet is a print artefact — don't pop it up in the viewer
+    when the user asks for it; the A5 is the reading copy."""
+    draft = _two_page_draft(tmp_path)
+    opened: list[Path] = []
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=lambda p: opened.append(Path(p)),
+    )
+
+    tool.handler({"impose": True})
+
+    a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
+    assert [p.resolve() for p in opened] == [a5.resolve()]
+
+
+def test_render_book_viewer_failure_is_non_fatal(tmp_path):
+    """If the OS viewer can't be launched (headless env, permission
+    error), the render still reports success — the files are on disk —
+    but the message honestly tells the user to open the file themselves
+    instead of falsely claiming it was opened."""
+    draft = _two_page_draft(tmp_path)
+
+    def boom(_p):
+        raise RuntimeError("no viewer here")
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=boom,
+    )
+
+    result = tool.handler({})
+
+    assert "Wrote A5 book" in result
+    assert (tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf").is_file()
+    # The message must not falsely claim the file was opened — it wasn't.
+    assert "opened it" not in result.lower()
+    assert "manually" in result.lower()
+
+
+def test_render_book_does_not_call_opener_when_render_fails(tmp_path, monkeypatch):
+    """If build_pdf errors out, the viewer is never invoked — there's
+    no file to open."""
+    draft = _two_page_draft(tmp_path)
+    opened: list = []
+
+    def boom(_book, _out):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("src.agent_tools.build_pdf", boom)
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=lambda p: opened.append(p),
+    )
+
+    tool.handler({})
+
+    assert opened == []
+
+
 def test_render_book_impose_failure_keeps_a5(tmp_path, monkeypatch):
     draft = _two_page_draft(tmp_path)
 
@@ -574,3 +688,66 @@ def test_render_book_impose_failure_keeps_a5(tmp_path, monkeypatch):
     assert a5.is_file()
     # Result mentions the booklet failure so the agent can tell the user.
     assert "imposition broke" in result or "booklet" in result.lower()
+
+
+# --- open_in_default_viewer (platform dispatch) --------------------------
+
+
+def test_open_in_default_viewer_uses_startfile_on_windows(monkeypatch, tmp_path):
+    """Windows dispatches the path to ``os.startfile`` — the shell's
+    default verb pops up whatever the user has registered for PDFs."""
+    calls: list[str] = []
+    monkeypatch.setattr(agent_tools.sys, "platform", "win32")
+    monkeypatch.setattr(
+        agent_tools.os,
+        "startfile",
+        lambda p: calls.append(p),
+        raising=False,
+    )
+
+    target = tmp_path / "book.pdf"
+    _real_open_in_default_viewer(target)
+
+    assert calls == [str(target)]
+
+
+def test_open_in_default_viewer_uses_open_on_macos(monkeypatch, tmp_path):
+    """macOS delegates to the ``open`` CLI so the user's default PDF app
+    launches."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(agent_tools.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        agent_tools.subprocess,
+        "Popen",
+        lambda cmd, **kw: calls.append((cmd, kw)),
+    )
+
+    target = tmp_path / "book.pdf"
+    _real_open_in_default_viewer(target)
+
+    assert len(calls) == 1
+    cmd, kw = calls[0]
+    assert cmd == ["open", str(target)]
+    # Detach so the viewer survives us and doesn't turn into a zombie.
+    assert kw.get("start_new_session") is True
+
+
+def test_open_in_default_viewer_uses_xdg_open_on_linux(monkeypatch, tmp_path):
+    """Everything non-Windows/non-macOS goes through ``xdg-open``."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(agent_tools.sys, "platform", "linux")
+    monkeypatch.setattr(
+        agent_tools.subprocess,
+        "Popen",
+        lambda cmd, **kw: calls.append((cmd, kw)),
+    )
+
+    target = tmp_path / "book.pdf"
+    _real_open_in_default_viewer(target)
+
+    assert len(calls) == 1
+    cmd, kw = calls[0]
+    assert cmd == ["xdg-open", str(target)]
+    # start_new_session prevents a zombie child if the caller exits
+    # before xdg-open's grandchild reparents itself.
+    assert kw.get("start_new_session") is True

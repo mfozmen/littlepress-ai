@@ -53,3 +53,16 @@ def _no_real_browser(monkeypatch):
     monkeypatch.setattr(
         webbrowser, "open", lambda url, *_a, **_kw: opened.append(url) or True
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_pdf_viewer(monkeypatch):
+    """After a successful render, ``render_book_tool`` hands the A5 PDF
+    to the OS's default viewer. A full suite run would therefore spawn
+    a viewer per render — on Windows that means a burst of PDF windows
+    during test collection. Swap the opener for a no-op; individual
+    tests that want to assert the viewer was called inject their own
+    ``open_file=`` instead of relying on the module-level default."""
+    from src import agent_tools
+
+    monkeypatch.setattr(agent_tools, "open_in_default_viewer", lambda _p: None)
