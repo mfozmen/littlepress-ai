@@ -160,6 +160,9 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
   ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
 
 - **release**: 1.1.0 [skip ci]
+  ([`45ca1d1`](https://github.com/mfozmen/littlepress-ai/commit/45ca1d1d9e8fdbf156d00b90d2bfa12bb95e3571))
+
+- **release**: 1.1.0 [skip ci]
   ([`410704f`](https://github.com/mfozmen/littlepress-ai/commit/410704f6d07f31dc7c471a71677b08d657dc2844))
 
 - **release**: 1.1.0 [skip ci]
@@ -294,6 +297,56 @@ Versioned renders (<slug>.vN.pdf snapshots alongside the stable <slug>.pdf) ship
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 ### Features
+
+- Mirror input PDFs so memory survives file moves
+  ([#31](https://github.com/mfozmen/littlepress-ai/pull/31),
+  [`b58dac3`](https://github.com/mfozmen/littlepress-ai/commit/b58dac3fe51c7489209de43fc39d4aa549ee1535))
+
+* feat: mirror input PDFs into .book-gen/input/ so memory survives file moves
+
+Today the draft PDF's ``source_pdf`` and persisted memory both key off whatever absolute path the
+  user dropped the PDF at — Downloads, Desktop, a colleague's shared folder. Deleting or moving that
+  file means the next run can't match what's saved; the session is gone.
+
+collect_input_pdf() in src/draft.py copies the PDF into
+  <session-root>/.book-gen/input/<stem>-<sha256[:8]>.pdf and returns that in-repo path. Both /load
+  and the CLI bootstrap route through the helper before ingesting the PDF, so Draft.source_pdf and
+  memory both key off a path we control. The user's Downloads folder can be cleaned without breaking
+  the session.
+
+Naming uses a content hash (first 8 hex of sha256) so: - Identical bytes always resolve to the same
+  in-repo path. Reruns are idempotent; memory matches. - Different bytes with the same basename (two
+  drafts both called draft.pdf) get distinct in-repo paths. Their memories stay separate instead of
+  silently cross-wiring.
+
+The helper also no-ops when the caller points at a path already under .book-gen/input/ — /load
+  .book-gen/input/draft-<hash>.pdf doesn't recurse or copy onto itself.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix: address PR review for collect_input_pdf
+
+- Migrate legacy memory on first relaunch. Users with a saved session from before this feature have
+  source_pdf = the original arg path; the CLI's memory lookup now uses the hashed in-repo path,
+  which wouldn't match. Silent discard of the saved state. On a first-lookup miss we fall back to
+  the pre-collection path and, if that hits, re-save with the new in-repo path so subsequent
+  launches skip the fallback.
+
+- Extend the hash from 8 to 16 hex chars. 32-bit namespace crosses 50% collision probability at ~77k
+  distinct PDFs — fine for a single user today, but the hedge to 64 bits is effectively free and
+  makes the scheme robust if .book-gen/input/ ever gets shared across projects or the tool grows
+  into batch workflows.
+
+- Clarify collect_input_pdf's idempotency contract in the docstring. The same-hash-same-path
+  invariant depends on the directory being owned by Littlepress — a user hand-editing a file in
+  there breaks the assumption. Say so explicitly instead of hiding it behind "same hash ⇒ same
+  bytes".
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **agent**: Auto-open the rendered A5 and surface absolute paths
   ([#29](https://github.com/mfozmen/littlepress-ai/pull/29),
