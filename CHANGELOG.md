@@ -108,6 +108,9 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 - **release**: 1.0.2 [skip ci]
   ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
 
+- **release**: 1.1.0 [skip ci]
+  ([`5facc08`](https://github.com/mfozmen/littlepress-ai/commit/5facc08c8bc2fe5b08a366347b3ca5cd5a367131))
+
 ### Continuous Integration
 
 - Retry release push so a racing merge doesn't skip a version bump
@@ -212,6 +215,61 @@ Hoist the PDF classifier check above the slash check. The classifier is conserva
 
 New regression test (platform-independent, via monkeypatch) simulates the Linux-style absolute-path
   drag and asserts /load is invoked instead of /dispatch_slash.
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- **repl**: Claude-code-style / menu with a logical command order
+  ([#26](https://github.com/mfozmen/littlepress-ai/pull/26),
+  [`7fb61a4`](https://github.com/mfozmen/littlepress-ai/commit/7fb61a406c113787b382b980745521171c6b1544))
+
+* feat(repl): Claude-Code-style / menu with a logical command order
+
+Ships the "Next up" item from PLAN.md.
+
+- New SlashCommand frozen dataclass (name, description, handler). The full catalog lives in
+  SLASH_COMMANDS at the bottom of src/repl.py; registration order there drives both /help output and
+  the new / menu. Order follows the workflow — load → pages → title → author → render → model →
+  logout → help → exit — rather than the incidental alphabetical / insertion order of before. -
+  /help now prints each command with its one-line description aligned in a column. -
+  src/cli.SlashCompleter plugs into prompt_toolkit. Typing `/` alone suggests every command with its
+  description as display_meta; typing `/lo` narrows to /load + /logout; case- insensitive prefix
+  match; non-slash input doesn't interrupt chat with a popup. - The CLI swaps builtins.input for a
+  PromptSession wired with the completer, but only when stdin is a TTY — non-TTY (pytest, piped
+  stdin, CI) falls back to input() so automation and tests keep working.
+
+prompt_toolkit >= 3.0 added to the default dependency list; tests still inject their own read_line
+  so they don't need a console.
+
+README slash-command table mentions the new / menu and follows the workflow order; PLAN.md entry
+  shipped.
+
+Nine new tests pin the catalog order, descriptions, frozen dataclass invariant, /help output, and
+  the completer's four behaviours (bare slash, prefix filter, case-insensitive, non-slash skipped).
+  292 tests total; 99% coverage.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix: close six findings on the / menu PR
+
+Addresses review feedback on #26.
+
+1. Repl.commands property return type updated to dict[str, SlashCommand] (was SlashHandler — stale
+  after the restructure). 2. Ctrl-C at the main prompt no longer dumps a traceback — matches the
+  Claude-Code / shell feel: Ctrl-C clears the line and reprompts, Ctrl-D / /exit actually leaves.
+  Picker, key prompt, retry prompt, and y/n confirm also treat KeyboardInterrupt as "cancel, go
+  back". 3. SlashCompleter suppresses the menu when the buffer looks path-ish (contains /, \, or .)
+  so drag-and-drop paste doesn't flash a /help popup mid-drag. Regression test checks several drag
+  snapshots. 4. New regression test pins the non-TTY fallback: PromptSession must NOT be constructed
+  when stdin.isatty() is False. 5. SlashCompleter reads document.current_line_before_cursor instead
+  of text_before_cursor so a future multiline=True switch doesn't break prefix matching. 6. Comment
+  on the isatty() gate rewritten — PromptSession.prompt(), not the constructor, is what needs a real
+  console.
+
+295 tests green; coverage 99%.
 
 ---------
 
