@@ -31,16 +31,27 @@ class SlashCompleter(Completer):
     """
 
     def get_completions(self, document, _complete_event):
-        text = document.text_before_cursor
+        # Use the current line's buffer so a future multiline=True
+        # session still hits the right prefix (no-op for single-line).
+        text = document.current_line_before_cursor
         if not text.startswith("/"):
+            return
+        prefix = text[1:]
+        # Drag-drop paths arrive character-by-character from the
+        # terminal; during that paste ``/h…`` briefly looks like a
+        # prefix match for ``/help``. Bail if the current buffer looks
+        # like a path so the popup doesn't flicker during a drag.
+        # Slash command names are short alphabetic tokens, so any dot,
+        # further slash, or backslash rules out command-completion.
+        if any(ch in prefix for ch in ("/", "\\", ".")):
             return
         # Import lazily so tests / scripts that don't use the CLI
         # don't have to import the full REPL just to spin up a completer.
         from src.repl import SLASH_COMMANDS
 
-        prefix = text[1:].lower()
+        prefix_lc = prefix.lower()
         for cmd in SLASH_COMMANDS:
-            if cmd.name.lower().startswith(prefix):
+            if cmd.name.lower().startswith(prefix_lc):
                 yield Completion(
                     text=f"/{cmd.name}",
                     start_position=-len(text),
@@ -72,10 +83,11 @@ def main(argv: list[str] | None = None) -> int:
     from src.providers.validator import validate_key
     from src.repl import Repl
 
-    # prompt_toolkit needs a real TTY on Windows — it probes the console
-    # buffer in its constructor and bails out on piped stdin / pytest
-    # capture. When we're not interactive, fall back to plain input()
-    # so automation (echo 'hi' | littlepress) and tests keep working.
+    # prompt_toolkit's PromptSession.prompt() needs a real console —
+    # on piped stdin / pytest capture / Windows without a real tty it
+    # can't set up raw-mode input. Fall back to plain input() in those
+    # environments so automation (echo 'hi' | littlepress) and tests
+    # keep working.
     if sys.stdin.isatty():
         from prompt_toolkit import PromptSession
 

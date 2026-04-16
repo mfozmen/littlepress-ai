@@ -149,6 +149,24 @@ def test_completer_skips_non_slash_input():
     assert completions == []
 
 
+def test_completer_suppresses_menu_during_drag_drop_paths():
+    """Dragging a path like ``/home/foo/draft.pdf`` types chars
+    one-at-a-time; at ``/h`` the completer would otherwise flash the
+    ``/help`` entry. Bail whenever the buffer looks path-ish
+    (contains ``/``, ``\\``, or ``.``) so the popup doesn't flicker."""
+    from prompt_toolkit.document import Document
+
+    from src.cli import SlashCompleter
+
+    completer = SlashCompleter()
+
+    # Mid-drag snapshots — each should produce no completions.
+    for snapshot in ("/h", "/home", "/home/", "/home/foo", "/Users/foo/draft.pdf"):
+        if "/" in snapshot[1:] or "." in snapshot:
+            completions = list(completer.get_completions(Document(snapshot), None))
+            assert completions == [], snapshot
+
+
 def test_completer_is_case_insensitive_on_prefix():
     """``/LOAD`` and ``/Load`` match the same entries as ``/load``."""
     from prompt_toolkit.document import Document

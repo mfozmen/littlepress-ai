@@ -177,7 +177,7 @@ class Repl:
         return root / ".book-gen" / "images"
 
     @property
-    def commands(self) -> dict[str, SlashHandler]:
+    def commands(self) -> dict[str, SlashCommand]:
         return self._commands
 
     def run(self) -> int:
@@ -204,6 +204,12 @@ class Repl:
                 raw = self._read()
             except EOFError:
                 return 0
+            except KeyboardInterrupt:
+                # Ctrl-C clears the current line and re-prompts — same
+                # feel as Claude Code / most shells. Exit requires
+                # Ctrl-D (EOF) or /exit.
+                self._console.print()
+                continue
             line = raw.strip()
             if not line:
                 continue
@@ -256,7 +262,7 @@ class Repl:
         self._console.print(f"[yellow]{prompt}[/yellow] (y/n)")
         try:
             answer = self._read().strip().lower()
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             return False
         return answer in {"y", "yes", "evet", "e"}
 
@@ -403,7 +409,7 @@ class Repl:
         while True:
             try:
                 api_key = self._read_secret().strip()
-            except EOFError:
+            except (EOFError, KeyboardInterrupt):
                 return None
             if self._validate is None:
                 return api_key
@@ -450,7 +456,7 @@ class Repl:
                 )
                 try:
                     self._read()
-                except EOFError:
+                except (EOFError, KeyboardInterrupt):
                     return "abort"
                 # Loop and re-validate with the same api_key.
 
@@ -458,7 +464,7 @@ class Repl:
         while True:
             try:
                 raw = self._read()
-            except EOFError:
+            except (EOFError, KeyboardInterrupt):
                 return None
             raw = raw.strip()
             if not raw:
