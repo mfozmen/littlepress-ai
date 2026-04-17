@@ -467,10 +467,15 @@ def generate_cover_illustration_tool(
             "into the project and set as the book's cover. Use this only "
             "when the user explicitly wants an AI-generated cover — "
             "prefer reusing a page's existing drawing via set_cover so "
-            "the child's artwork leads. 'quality' trades off cost vs "
-            "detail: low ≈ $0.02, medium ≈ $0.07, high ≈ $0.19. 'style' "
-            "is optional and picks the cover template; omit it to leave "
-            "the current choice alone."
+            "the child's artwork leads. PRESERVE-CHILD-VOICE: describe "
+            "the cover scene in your own words from the story's themes; "
+            "do NOT quote or paraphrase the child's page text into the "
+            "prompt. The cover picture may be generated, but the "
+            "wording that produces it must not launder the child's "
+            "sentences through the image model. 'quality' trades off "
+            "cost vs detail: low ≈ $0.02, medium ≈ $0.07, high ≈ $0.19. "
+            "'style' is optional and picks the cover template; omit it "
+            "to leave the current choice alone."
         ),
         input_schema={
             "type": "object",

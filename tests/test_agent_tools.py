@@ -789,6 +789,29 @@ def test_generate_cover_illustration_requires_non_empty_prompt(tmp_path):
     assert "prompt" in result.lower()
 
 
+def test_generate_cover_illustration_description_guards_child_voice(tmp_path):
+    """The tool description is the agent-visible contract. CLAUDE.md
+    requires preserve-child-voice to be enforced at the tool surface —
+    for image generation that means the agent must not build the
+    prompt by paraphrasing the child's page text. Spell it out in the
+    description so the LLM can't miss it."""
+    tool = generate_cover_illustration_tool(
+        get_draft=lambda: None,
+        get_session_root=lambda: tmp_path,
+        image_provider=_FakeImageProvider(),
+        confirm=lambda _: True,
+    )
+
+    desc = tool.description.lower()
+    # Must explicitly forbid lifting the child's wording into the
+    # prompt. We check for a representative phrase rather than the
+    # exact string so the wording can evolve.
+    assert "own words" in desc or "not paraphrase" in desc or "don't paraphrase" in desc
+    # And must mention that the child's text is the thing being guarded —
+    # not just a generic "be careful" hand-wave.
+    assert "child" in desc
+
+
 def test_generate_cover_illustration_schema_advertises_style_and_quality(
     tmp_path,
 ):
