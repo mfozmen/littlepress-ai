@@ -13,17 +13,33 @@ name: Release
 on:
   push:
     branches: [main]
+    # PSR's own release commit touches CHANGELOG.md (and pyproject.toml
+    # for the version bump). The ``[skip ci]`` tag in PSR's
+    # ``commit_message`` already prevents a release → push → release
+    # loop under ``GITHUB_TOKEN`` (Actions silently suppresses
+    # workflow re-triggers from token-authored commits). This
+    # ``paths-ignore`` on CHANGELOG.md is defense-in-depth: if auth
+    # ever moves to a PAT — e.g. so the release can trigger a
+    # downstream publish workflow — the GITHUB_TOKEN auto-suppression
+    # goes away and only ``[skip ci]`` + this guard remain. We keep
+    # ``pyproject.toml`` eligible so legitimate human edits (new
+    # dependency, metadata change) still run the release scan.
+    paths-ignore:
+      - CHANGELOG.md
   workflow_dispatch:
     inputs:
       force:
         description: >-
           Force the bump level regardless of the commit history.
-          Only used on manual dispatch — push events leave this
-          empty and let PSR compute the bump from commit types.
+          Leave on the default (empty) to let PSR scan commits and
+          pick the bump itself — safe now that v1.1.0 is tagged and
+          the stale BREAKING CHANGE footer sits behind it. Pick a
+          level explicitly only when you want to override PSR.
         required: false
-        default: patch
+        default: ""
         type: choice
         options:
+          - ""
           - patch
           - minor
           - major
