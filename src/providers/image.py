@@ -23,7 +23,6 @@ path doesn't need it installed.
 from __future__ import annotations
 
 import base64
-import binascii
 import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -123,7 +122,9 @@ class OpenAIImageProvider:
 
         try:
             png_bytes = base64.b64decode(b64, validate=True)
-        except (binascii.Error, ValueError) as e:
+        except ValueError as e:
+            # ``binascii.Error`` is a subclass of ``ValueError`` since
+            # 3.2, so catching the parent covers both — Sonar S5713.
             raise ImageGenerationError(
                 f"OpenAI returned malformed base64 image data: {e}"
             ) from e

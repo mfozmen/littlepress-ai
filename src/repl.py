@@ -193,15 +193,25 @@ class Repl:
             if chosen is None:
                 return 0
             self._activate(*chosen)
-        # If the CLI pre-loaded a draft and a real provider is active,
-        # kick the agent off so the user sees an immediate response
-        # ("I see 8 pages..."). Offline stays quiet.
-        if self._draft is not None and not isinstance(self._llm, NullProvider):
-            try:
-                self._agent.say(_AGENT_GREETING_HINT)
-            except Exception as e:
-                self._console.print(f"[red]Agent error:[/red] {e}")
-            self._persist_draft()
+        self._greet_if_draft_loaded()
+        return self._read_loop()
+
+    def _greet_if_draft_loaded(self) -> None:
+        """Kick off the agent with the pre-loaded draft so the user
+        sees an immediate response. No-op when offline (NullProvider)
+        or when no PDF was pre-loaded by the CLI."""
+        if self._draft is None or isinstance(self._llm, NullProvider):
+            return
+        try:
+            self._agent.say(_AGENT_GREETING_HINT)
+        except Exception as e:
+            self._console.print(f"[red]Agent error:[/red] {e}")
+        self._persist_draft()
+
+    def _read_loop(self) -> int:
+        """Drive the interactive read loop until the user exits.
+        Returns the exit code bubbled up from ``_dispatch`` (or 0 on
+        EOF — Ctrl-D)."""
         while True:
             try:
                 raw = self._read()

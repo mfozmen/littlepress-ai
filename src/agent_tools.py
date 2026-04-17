@@ -329,52 +329,13 @@ def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
         if draft is None:
             return _MSG_NO_DRAFT
         style = input_.get("style")
-        # Validate style first so a bad value doesn't half-commit the
-        # cover state.
-        if style is not None and style not in VALID_COVER_STYLES:
-            return (
-                f"Invalid style '{style}'. Valid styles: "
-                f"{sorted(VALID_COVER_STYLES)}."
-            )
-        # If ``page`` was provided, validate it regardless of style —
-        # an out-of-range number is a mistake whether we use it or
-        # not. Silent acceptance would hide typos that matter the
-        # moment the agent switches away from poster.
         page_n_raw = input_.get("page")
-        if page_n_raw is not None:
-            page_n = int(page_n_raw)
-            if page_n < 1 or page_n > len(draft.pages):
-                return (
-                    f"Page {page_n} is out of range — the draft has "
-                    f"{len(draft.pages)} pages."
-                )
-
+        error = _validate_cover_inputs(draft, style, page_n_raw)
+        if error is not None:
+            return error
         if style == "poster":
-            # Type-only template — no drawing needed. Keep the existing
-            # cover_image alone so a previous full-bleed choice isn't
-            # silently discarded if the agent flips back later.
-            draft.cover_style = "poster"
-            msg = "Cover set to 'poster' style (type-only — no drawing used)."
-            if page_n_raw is not None:
-                msg += f" (The 'page' argument was ignored for this style.)"
-            return msg
-
-        if page_n_raw is None:
-            return (
-                "page is required unless style='poster'. Name the page "
-                "whose drawing should be the cover."
-            )
-        page_n = int(page_n_raw)
-        page = draft.pages[page_n - 1]
-        if page.image is None:
-            return f"Page {page_n} has no drawing — can't use it as the cover."
-        draft.cover_image = page.image
-        if style is not None:
-            draft.cover_style = style
-        msg = f"Cover set to page {page_n}'s drawing ({page.image})"
-        if style is not None:
-            msg += f" with '{style}' layout"
-        return msg + "."
+            return _apply_poster_cover(draft, page_n_raw)
+        return _apply_image_cover(draft, style, page_n_raw)
 
     return Tool(
         name="set_cover",
@@ -410,6 +371,60 @@ def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
         },
         handler=handler,
     )
+
+
+def _validate_cover_inputs(draft, style, page_n_raw) -> str | None:
+    """Return a rejection string if ``style`` or ``page_n_raw`` don't
+    match a valid cover, or ``None`` when the pair is shaped right.
+    Style is checked first so a bad value doesn't half-commit state;
+    page number is checked regardless of style so a typo doesn't get
+    silently accepted by the poster branch."""
+    if style is not None and style not in VALID_COVER_STYLES:
+        return (
+            f"Invalid style '{style}'. Valid styles: "
+            f"{sorted(VALID_COVER_STYLES)}."
+        )
+    if page_n_raw is None:
+        return None
+    page_n = int(page_n_raw)
+    if page_n < 1 or page_n > len(draft.pages):
+        return (
+            f"Page {page_n} is out of range — the draft has "
+            f"{len(draft.pages)} pages."
+        )
+    return None
+
+
+def _apply_poster_cover(draft, page_n_raw) -> str:
+    """Poster is type-only: no drawing needed. Keep the existing
+    ``cover_image`` alone so a previous full-bleed choice isn't
+    silently discarded if the agent flips back later."""
+    draft.cover_style = "poster"
+    msg = "Cover set to 'poster' style (type-only — no drawing used)."
+    if page_n_raw is not None:
+        msg += " (The 'page' argument was ignored for this style.)"
+    return msg
+
+
+def _apply_image_cover(draft, style, page_n_raw) -> str:
+    """Non-poster styles all need a page with an image; reject early
+    if either's missing, then record the cover + optional style."""
+    if page_n_raw is None:
+        return (
+            "page is required unless style='poster'. Name the page "
+            "whose drawing should be the cover."
+        )
+    page_n = int(page_n_raw)
+    page = draft.pages[page_n - 1]
+    if page.image is None:
+        return f"Page {page_n} has no drawing — can't use it as the cover."
+    draft.cover_image = page.image
+    if style is not None:
+        draft.cover_style = style
+    msg = f"Cover set to page {page_n}'s drawing ({page.image})"
+    if style is not None:
+        msg += f" with '{style}' layout"
+    return msg + "."
 
 
 # OpenAI ``gpt-image-1`` pricing (portrait 1024x1536, USD, approximate).
@@ -471,7 +486,7 @@ def generate_cover_illustration_tool(
 
         cost = _IMAGE_COST_USD[quality]
         confirm_msg = (
-            f"Generate a cover illustration with OpenAI gpt-image-1?\n"
+            "Generate a cover illustration with OpenAI gpt-image-1?\n"
             f"  Prompt : {prompt}\n"
             f"  Quality: {quality} (~${cost:.2f})\n"
             "This will call the OpenAI image API and bill your account."
@@ -667,7 +682,7 @@ def _render_message(
     if not stable_updated:
         return (
             f"Wrote snapshot {versioned}. Couldn't update {stable.name} "
-            f"(is it open in a PDF viewer? close it and copy "
+            "(is it open in a PDF viewer? close it and copy "
             f"{versioned.name} over {stable.name} to refresh)."
         )
     tail = (
@@ -729,7 +744,7 @@ def propose_layouts_tool(
         items = input_.get("layouts") or []
         if len(items) != len(draft.pages):
             return (
-                f"propose_layouts expects one entry per page "
+                "propose_layouts expects one entry per page "
                 f"({len(draft.pages)} needed, got {len(items)}). This "
                 "tool is for the full rhythm — use choose_layout for "
                 "a partial change."
@@ -740,7 +755,7 @@ def propose_layouts_tool(
         if rejection is not None:
             return rejection
 
-        prompt = _build_layout_prompt(draft, items)
+        prompt = _build_layout_prompt(items)
         if not confirm(prompt):
             return (
                 "User declined the proposed rhythm. Ask what they'd "
@@ -819,7 +834,7 @@ def _reject_layout_batch(draft: Draft, items: list[dict]) -> str | None:
     return None
 
 
-def _build_layout_prompt(draft: Draft, items: list[dict]) -> str:
+def _build_layout_prompt(items: list[dict]) -> str:
     """Render a table-ish summary of the proposed rhythm for the y/n
     prompt — the user sees every page and the reason for the choice."""
     rows = ["Proposed layouts:"]
