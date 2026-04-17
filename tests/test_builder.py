@@ -482,6 +482,28 @@ def test_cover_title_band_top_renders_title_author_and_drawing(tmp_path):
     assert "Yusuf" in cover_text
 
 
+def test_cover_title_band_top_renders_subtitle(tmp_path):
+    """``title-band-top``: a short-titled cover must render the subtitle
+    inside the coloured band, right below the title. Pins the subtitle
+    contract for this template — the band is wide enough that a short
+    title + short subtitle must always fit."""
+    img = _cover_image(tmp_path)
+    book = Book(
+        title="Owls",
+        author="Yusuf",
+        cover=Cover(image=img.name, subtitle="a night adventure", style="title-band-top"),
+        back_cover=BackCover(),
+        pages=[Page(text="x", image=None, layout="text-only")],
+        source_dir=tmp_path,
+    )
+    out = tmp_path / "book.pdf"
+    build_pdf(book, out)
+
+    reader = PdfReader(str(out))
+    cover_text = reader.pages[0].extract_text() or ""
+    assert "a night adventure" in cover_text
+
+
 def test_draw_cover_dispatches_portrait_frame_and_title_band_top(
     tmp_path, monkeypatch
 ):

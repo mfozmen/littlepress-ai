@@ -300,7 +300,6 @@ def _draw_cover_title_band_top(c: Canvas, book: Book) -> None:
     # background. Skip the subtitle rather than producing illegible
     # text).
     band_bottom = PAGE_H - band_h
-    subtitle_bottom = title_y
     if book.cover.subtitle:
         candidate_y = title_y - title_size * 0.35 - COVER_AUTHOR_SIZE
         if candidate_y >= band_bottom + 2 * mm:
@@ -308,8 +307,7 @@ def _draw_cover_title_band_top(c: Canvas, book: Book) -> None:
             sw = pdfmetrics.stringWidth(
                 book.cover.subtitle, FONT_REGULAR, COVER_AUTHOR_SIZE,
             )
-            subtitle_bottom = candidate_y
-            c.drawString((PAGE_W - sw) / 2, subtitle_bottom, book.cover.subtitle)
+            c.drawString((PAGE_W - sw) / 2, candidate_y, book.cover.subtitle)
 
     # Drawing fills the space between the band and the author strip.
     if book.cover.image:
