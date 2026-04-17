@@ -30,6 +30,7 @@ from src.agent_tools import (
     render_book_tool,
     set_cover_tool,
     set_metadata_tool,
+    transcribe_page_tool,
 )
 from src.draft import Draft
 from src.providers.image import OpenAIImageProvider
@@ -265,6 +266,9 @@ class Repl:
             propose_layouts_tool(get_draft=get_draft, confirm=self._confirm),
             render_book_tool(
                 get_draft=get_draft, get_session_root=get_session_root
+            ),
+            transcribe_page_tool(
+                get_draft=get_draft, get_llm=lambda: self._llm
             ),
         ]
         # AI cover generation is OpenAI-only for now — don't advertise

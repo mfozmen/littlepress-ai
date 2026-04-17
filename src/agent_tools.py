@@ -179,9 +179,12 @@ def read_draft_tool(get_draft: Callable[[], Draft | None]) -> Tool:
                 f"NOTE: page(s) {which} are image-only — the PDF has no "
                 "text layer there, likely a Samsung Notes / phone-scan "
                 "export where the text is rendered inside the image. "
-                "OCR is not available yet; ask the user to transcribe "
-                "each page's text verbatim. Do not invent, paraphrase, "
-                "or 'guess' the child's words — preserve-child-voice."
+                "Use the ``transcribe_page`` tool to OCR each flagged "
+                "page via the active LLM's vision capability (Claude 3+, "
+                "GPT-4o, Gemini 1.5+), or ask the user to transcribe "
+                "manually. Always confirm the transcription with the "
+                "user before moving on. Do not invent, paraphrase, or "
+                "'guess' the child's words — preserve-child-voice."
             )
         return "\n".join(lines)
 
@@ -368,6 +371,127 @@ def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
                 },
             },
             "required": [],
+        },
+        handler=handler,
+    )
+
+
+def transcribe_page_tool(
+    get_draft: Callable[[], Draft | None],
+    get_llm: Callable[[], object],
+) -> Tool:
+    """Tool: use the active LLM's vision capability to transcribe a
+    page's image text verbatim into ``draft.pages[n-1].text``.
+
+    Escape hatch for image-only PDFs (Samsung Notes exports, phone
+    scans) where the embedded text is pixels rather than `/Font`
+    glyphs and ``pypdf.extract_text`` legitimately returns empty.
+    The active LLM must support multimodal input (Claude 3+, GPT-4o,
+    Gemini 1.5+, LLaVA on Ollama); when it doesn't, the provider will
+    raise and the tool reports a clean failure so the user can fall
+    back to manual transcription.
+
+    Preserve-child-voice: the prompt instructs the vision model to
+    output the text verbatim — no typo fixes, no "polish". The child
+    wrote it; OCR doesn't get to rewrite it any more than the typo-fix
+    tool does.
+    """
+
+    def handler(input_: dict) -> str:
+        draft = get_draft()
+        if draft is None:
+            return _MSG_NO_DRAFT
+        page_n = int(input_["page"])
+        if page_n < 1 or page_n > len(draft.pages):
+            return (
+                f"Page {page_n} is out of range — the draft has "
+                f"{len(draft.pages)} pages."
+            )
+        page = draft.pages[page_n - 1]
+        if page.image is None:
+            return (
+                f"Page {page_n} has no image to transcribe — nothing to "
+                "OCR."
+            )
+
+        import base64
+        import mimetypes
+
+        image_path = Path(page.image)
+        media_type, _ = mimetypes.guess_type(image_path.name)
+        if media_type is None:
+            media_type = "image/png"
+        img_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": img_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Transcribe the text visible in this image "
+                            "EXACTLY as written. A child wrote or typed "
+                            "this; preserve every spelling mistake, "
+                            "line break, punctuation choice, and "
+                            "capitalisation verbatim. Do NOT fix, "
+                            "polish, or improve the wording in any "
+                            "way — preserve-child-voice. Output ONLY "
+                            "the transcribed text, with no preamble, "
+                            "quotes, or commentary."
+                        ),
+                    },
+                ],
+            }
+        ]
+
+        llm = get_llm()
+        try:
+            reply = llm.chat(messages)
+        except Exception as e:
+            return (
+                f"Transcription failed on page {page_n}: {e}. The "
+                "active LLM may not support vision — ask the user to "
+                "transcribe manually, or switch to a multimodal model "
+                "via /model (Claude 3+, GPT-4o, or Gemini 1.5+)."
+            )
+
+        page.text = str(reply).strip()
+        preview = page.text[:80].replace("\n", " ")
+        return (
+            f"Page {page_n} transcribed ({len(page.text)} chars). "
+            f"Preview: {preview!r}. Ask the user to confirm the "
+            "transcription matches the image before moving on."
+        )
+
+    return Tool(
+        name="transcribe_page",
+        description=(
+            "Transcribe a single page's text from its image using the "
+            "active LLM's vision capability. Use this when a page is "
+            "flagged ``[image-only]`` by read_draft — the embedded "
+            "text layer is empty but the image clearly shows words. "
+            "Preserve-child-voice: the vision prompt tells the model "
+            "to copy the text verbatim (no typo fixes, no paraphrase). "
+            "Confirm the transcription with the user before relying "
+            "on it; OCR — even LLM vision — can mis-read handwriting. "
+            "Fails cleanly when the active LLM doesn't support "
+            "vision; in that case, ask the user to type the text."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "minimum": 1},
+            },
+            "required": ["page"],
         },
         handler=handler,
     )

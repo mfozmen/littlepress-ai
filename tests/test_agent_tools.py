@@ -15,6 +15,7 @@ from src.agent_tools import (
     render_book_tool,
     set_cover_tool,
     set_metadata_tool,
+    transcribe_page_tool,
 )
 from src.draft import Draft, DraftPage
 from src.providers.image import ImageGenerationError
@@ -1058,6 +1059,170 @@ def test_generate_cover_illustration_schema_advertises_style_and_quality(
         "full-bleed", "framed", "poster", "portrait-frame", "title-band-top",
     }
     assert tool.input_schema["required"] == ["prompt"]
+
+
+# --- transcribe_page ----------------------------------------------------
+
+
+class _FakeLLM:
+    """Captures the messages it was called with so tests can inspect
+    the transcription prompt + attached image."""
+
+    def __init__(self, reply: str = "transcribed text", raises: Exception | None = None):
+        self.reply = reply
+        self.raises = raises
+        self.calls: list[list] = []
+
+    def chat(self, messages):
+        self.calls.append(messages)
+        if self.raises is not None:
+            raise self.raises
+        return self.reply
+
+
+def _image_only_draft(tmp_path) -> Draft:
+    """Draft with one page carrying an image but no extracted text —
+    the shape ``transcribe_page`` exists to handle."""
+    img = tmp_path / "page-01.png"
+    img.write_bytes(b"fake-png-bytes")
+    return Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Book",
+        author="A",
+        pages=[DraftPage(text="", image=img)],
+    )
+
+
+def test_transcribe_page_requires_a_loaded_draft(tmp_path):
+    tool = transcribe_page_tool(
+        get_draft=lambda: None, get_llm=lambda: _FakeLLM()
+    )
+
+    result = tool.handler({"page": 1})
+
+    assert "no draft" in result.lower()
+
+
+def test_transcribe_page_rejects_out_of_range_page(tmp_path):
+    draft = _image_only_draft(tmp_path)
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: _FakeLLM()
+    )
+
+    result = tool.handler({"page": 99})
+
+    assert "99" in result or "out of" in result.lower()
+
+
+def test_transcribe_page_rejects_page_without_image(tmp_path):
+    """Imageless pages have nothing to transcribe — reject so the
+    agent doesn't waste a vision round-trip."""
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Book",
+        author="A",
+        pages=[DraftPage(text="", image=None)],
+    )
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: _FakeLLM()
+    )
+
+    result = tool.handler({"page": 1})
+
+    assert "no image" in result.lower() or "no drawing" in result.lower()
+
+
+def test_transcribe_page_sends_image_and_preserve_child_voice_prompt(tmp_path):
+    """The tool must send the page's image (as a base64 content block)
+    alongside a prompt that tells the LLM vision to transcribe verbatim
+    — no "polishing," no typo fixes. Preserve-child-voice applies to
+    OCR output as strongly as to manual edits."""
+    draft = _image_only_draft(tmp_path)
+    llm = _FakeLLM(reply="once upon a time")
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: llm
+    )
+
+    tool.handler({"page": 1})
+
+    assert len(llm.calls) == 1
+    messages = llm.calls[0]
+    assert len(messages) == 1
+    content = messages[0]["content"]
+
+    # At least one image block with base64-encoded bytes.
+    image_blocks = [b for b in content if b.get("type") == "image"]
+    assert len(image_blocks) == 1
+    src = image_blocks[0]["source"]
+    assert src["type"] == "base64"
+    assert src["media_type"].startswith("image/")
+    assert src["data"]  # non-empty base64 string
+
+    # At least one text block with the verbatim / preserve-child-voice
+    # invariant.
+    text_blocks = [b for b in content if b.get("type") == "text"]
+    prompt = " ".join(b["text"].lower() for b in text_blocks)
+    assert "verbatim" in prompt or "exactly" in prompt
+    assert "not fix" in prompt or "don't fix" in prompt or "do not fix" in prompt
+    assert "child" in prompt
+
+
+def test_transcribe_page_stores_returned_text_in_draft(tmp_path):
+    """On a successful vision call the reply lands in
+    ``draft.pages[n-1].text`` so the next ``read_draft`` sees it —
+    no second tool call needed."""
+    draft = _image_only_draft(tmp_path)
+    llm = _FakeLLM(reply="Bir gün bir yumurta çatlamış")
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: llm
+    )
+
+    tool.handler({"page": 1})
+
+    assert draft.pages[0].text == "Bir gün bir yumurta çatlamış"
+
+
+def test_transcribe_page_does_not_touch_draft_on_llm_error(tmp_path):
+    """If the LLM raises (vision unsupported, rate limit, offline),
+    page text must stay untouched — the user can see the error and
+    fall back to manual transcription."""
+    draft = _image_only_draft(tmp_path)
+    llm = _FakeLLM(raises=RuntimeError("vision unsupported on this model"))
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: llm
+    )
+
+    result = tool.handler({"page": 1})
+
+    assert draft.pages[0].text == ""
+    assert "vision" in result.lower() or "failed" in result.lower()
+
+
+def test_transcribe_page_reply_is_stripped_before_storing(tmp_path):
+    """LLM sometimes wraps the reply in whitespace / newlines;
+    leading/trailing whitespace would render as a blank first line on
+    the page. Strip only the edges — do NOT collapse interior
+    whitespace (line breaks in the child's text are intentional)."""
+    draft = _image_only_draft(tmp_path)
+    llm = _FakeLLM(reply="\n\n  line one\nline two  \n\n")
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: llm
+    )
+
+    tool.handler({"page": 1})
+
+    assert draft.pages[0].text == "line one\nline two"
+
+
+def test_transcribe_page_schema_requires_only_page_number(tmp_path):
+    """Schema must name ``page`` as the only required input — the
+    LLM reads the schema to decide what to pass."""
+    tool = transcribe_page_tool(
+        get_draft=lambda: None, get_llm=lambda: _FakeLLM()
+    )
+
+    assert tool.input_schema["required"] == ["page"]
+    assert "page" in tool.input_schema["properties"]
 
 
 # --- choose_layout -------------------------------------------------------
