@@ -112,46 +112,73 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.pdf:
-        pdf_path = Path(args.pdf).expanduser().resolve(strict=False)
-        if not pdf_path.is_file():
-            print(f"Error: file not found: {pdf_path}")
-            return 1
-        # Mirror the PDF into .book-gen/input/ first so the memory
-        # lookup below keys off the in-repo path (same key as last
-        # time). Running with either the original arg or the copied
-        # path lands on the saved session.
-        original_path = pdf_path
-        pdf_path = draft_mod.collect_input_pdf(pdf_path, session_root)
-        # Prefer a saved draft for this PDF if we have one — otherwise
-        # the agent would re-ask every decision the user already made.
-        restored = memory_mod.load_draft(
-            session_root, expected_source=pdf_path
+        rc = _load_pdf_into_repl(
+            repl, args.pdf, session_root, draft_mod, memory_mod
         )
-        if restored is None and original_path != pdf_path:
-            # One-shot migration for users upgrading from the pre-
-            # collection era: their saved source_pdf is the original
-            # absolute path (Downloads, …) which won't match the
-            # hashed in-repo copy. If a session for that legacy path
-            # exists, adopt it and re-save with the new path so the
-            # next launch takes the fast path.
-            legacy = memory_mod.load_draft(
-                session_root, expected_source=original_path
-            )
-            if legacy is not None:
-                legacy.source_pdf = pdf_path
-                memory_mod.save_draft(session_root, legacy)
-                restored = legacy
-        if restored is not None:
-            repl.set_draft(restored)
-        else:
-            images_dir = session_root / ".book-gen" / "images"
-            try:
-                repl.set_draft(draft_mod.from_pdf(pdf_path, images_dir))
-            except Exception as e:
-                print(f"Error: could not read PDF: {e}")
-                return 1
+        if rc != 0:
+            return rc
 
     return repl.run()
+
+
+def _load_pdf_into_repl(
+    repl, pdf_arg: str, session_root, draft_mod, memory_mod
+) -> int:
+    """Resolve ``pdf_arg``, mirror it into ``.book-gen/input/``, and
+    populate the REPL's draft — either from a saved session for this
+    PDF, a migrated legacy session, or a fresh ingest. Returns ``0``
+    on success, ``1`` on a user-visible error."""
+    from pathlib import Path
+
+    pdf_path = Path(pdf_arg).expanduser().resolve(strict=False)
+    if not pdf_path.is_file():
+        print(f"Error: file not found: {pdf_path}")
+        return 1
+    # Mirror the PDF into .book-gen/input/ first so the memory lookup
+    # keys off the in-repo path (same key as last time). Running with
+    # either the original arg or the copied path lands on the saved
+    # session.
+    original_path = pdf_path
+    pdf_path = draft_mod.collect_input_pdf(pdf_path, session_root)
+
+    restored = _restore_saved_draft_or_migrate(
+        session_root, pdf_path, original_path, memory_mod
+    )
+    if restored is not None:
+        repl.set_draft(restored)
+        return 0
+
+    images_dir = session_root / ".book-gen" / "images"
+    try:
+        repl.set_draft(draft_mod.from_pdf(pdf_path, images_dir))
+    except Exception as e:
+        print(f"Error: could not read PDF: {e}")
+        return 1
+    return 0
+
+
+def _restore_saved_draft_or_migrate(
+    session_root, pdf_path, original_path, memory_mod
+):
+    """Return the saved ``Draft`` for this PDF, or ``None`` if there
+    isn't one. Includes a one-shot migration for users upgrading from
+    the pre-collection era: their saved ``source_pdf`` points at the
+    original absolute path (Downloads, …), which won't match the
+    hashed in-repo copy. When a legacy session exists, adopt it and
+    re-save with the new path so the next launch takes the fast path."""
+    restored = memory_mod.load_draft(session_root, expected_source=pdf_path)
+    if restored is not None:
+        return restored
+    if original_path == pdf_path:
+        return None
+    legacy = memory_mod.load_draft(
+        session_root, expected_source=original_path
+    )
+    if legacy is None:
+        return None
+    legacy.source_pdf = pdf_path
+    memory_mod.save_draft(session_root, legacy)
+    return legacy
 
 
 if __name__ == "__main__":
