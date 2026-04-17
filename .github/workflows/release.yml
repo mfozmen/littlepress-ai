@@ -1,29 +1,45 @@
 name: Release
 
-# Manual-only. The original push-on-main trigger caused two cycles of
-# bad auto-bumps: the push=false workaround skipped VCS release
-# creation entirely (so tags and GitHub Releases never appeared), and
-# an old `BREAKING CHANGE:` footer in the legacy-removal commit kept
-# forcing every subsequent bump to v2.0.0. Switching to
-# workflow_dispatch puts the version call back in a human's hands —
-# trigger with `gh workflow run release.yml -f force=minor` (or major,
-# patch, or empty for PSR's own calculation) from the Actions UI or
-# the gh CLI when we actually want to cut a release.
+# Automatic on every merge to main, with a manual-dispatch escape
+# hatch for emergencies. PSR scans commits since the last tag (now
+# v1.1.0) and bumps per Conventional Commits — feat → minor,
+# fix/perf → patch, BREAKING CHANGE → major. The stale legacy-removal
+# ``BREAKING CHANGE:`` footer from PR #38 sits behind v1.1.0 in
+# history, so PSR will never see it again; future bumps stay in the
+# 1.x line until a deliberate breaking change lands.
+#
+# If a bump needs to be forced (rare — e.g. cutting a prerelease),
+# trigger manually: ``gh workflow run release.yml -f force=<level>``.
 on:
+  push:
+    branches: [main]
+    # PSR's own release commit touches CHANGELOG.md (and pyproject.toml
+    # for the version bump). The ``[skip ci]`` tag in PSR's
+    # ``commit_message`` already prevents a release → push → release
+    # loop under ``GITHUB_TOKEN`` (Actions silently suppresses
+    # workflow re-triggers from token-authored commits). This
+    # ``paths-ignore`` on CHANGELOG.md is defense-in-depth: if auth
+    # ever moves to a PAT — e.g. so the release can trigger a
+    # downstream publish workflow — the GITHUB_TOKEN auto-suppression
+    # goes away and only ``[skip ci]`` + this guard remain. We keep
+    # ``pyproject.toml`` eligible so legitimate human edits (new
+    # dependency, metadata change) still run the release scan.
+    paths-ignore:
+      - CHANGELOG.md
   workflow_dispatch:
     inputs:
       force:
         description: >-
           Force the bump level regardless of the commit history.
-          Defaults to `minor` so the first dispatch in this repo
-          doesn't re-trigger the stale BREAKING CHANGE footer that
-          came with PR #38 (legacy build.py removal) and would
-          otherwise push another major bump. Override only when
-          you've intentionally staged a different level.
+          Leave on the default (empty) to let PSR scan commits and
+          pick the bump itself — safe now that v1.1.0 is tagged and
+          the stale BREAKING CHANGE footer sits behind it. Pick a
+          level explicitly only when you want to override PSR.
         required: false
-        default: minor
+        default: ""
         type: choice
         options:
+          - ""
           - patch
           - minor
           - major
