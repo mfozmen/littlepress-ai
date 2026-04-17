@@ -15,13 +15,15 @@ on:
       force:
         description: >-
           Force the bump level regardless of the commit history.
-          Use `minor` to override a stale BREAKING CHANGE footer
-          from a previous commit. Leave empty to let PSR decide.
+          Defaults to `minor` so the first dispatch in this repo
+          doesn't re-trigger the stale BREAKING CHANGE footer that
+          came with PR #38 (legacy build.py removal) and would
+          otherwise push another major bump. Override only when
+          you've intentionally staged a different level.
         required: false
-        default: ""
+        default: minor
         type: choice
         options:
-          - ""
           - patch
           - minor
           - major
