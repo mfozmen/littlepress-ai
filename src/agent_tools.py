@@ -163,8 +163,13 @@ def read_draft_tool(get_draft: Callable[[], Draft | None]) -> Tool:
         draft = get_draft()
         if draft is None:
             return _MSG_NO_DRAFT
+        # Compact ``[image-only]`` tags go inline on each flagged
+        # page; the full preserve-child-voice rationale (ask the
+        # user to transcribe, don't invent) lives exactly once in
+        # the summary NOTE built by ``_build_image_only_note``.
         lines = _read_draft_header_lines(draft)
-        image_only_pages = _read_draft_page_lines(draft, lines)
+        page_lines, image_only_pages = _read_draft_page_lines(draft)
+        lines.extend(page_lines)
         if image_only_pages:
             lines.append(_build_image_only_note(image_only_pages))
         return "\n".join(lines)
@@ -207,13 +212,15 @@ def _read_draft_header_lines(draft: Draft) -> list[str]:
     ]
 
 
-def _read_draft_page_lines(draft: Draft, lines: list[str]) -> list[int]:
-    """Append one line per page to ``lines`` and return the list of
-    1-indexed pages flagged ``[image-only]`` (drawing but empty
-    text — Samsung Notes / phone-scan exports). The compact tag is
-    appended in-line; the full preserve-child-voice explanation
-    lives in the single summary NOTE built by
-    ``_build_image_only_note``."""
+def _read_draft_page_lines(draft: Draft) -> tuple[list[str], list[int]]:
+    """Return ``(page_lines, image_only_pages)``: one line per page,
+    plus the 1-indexed pages flagged ``[image-only]`` (drawing but
+    empty text — Samsung Notes / phone-scan exports). The compact
+    tag is in the line itself; the full preserve-child-voice
+    explanation lives in the single summary NOTE built by
+    ``_build_image_only_note``. Pure function — caller appends the
+    returned lines to its running list."""
+    page_lines: list[str] = []
     image_only_pages: list[int] = []
     for i, page in enumerate(draft.pages, start=1):
         marker = "drawing" if page.image is not None else "no drawing"
@@ -222,8 +229,10 @@ def _read_draft_page_lines(draft: Draft, lines: list[str]) -> list[int]:
         tag = " [image-only]" if image_only else ""
         if image_only:
             image_only_pages.append(i)
-        lines.append(f"  Page {i} ({marker}, layout={page.layout}):{tag} {text}")
-    return image_only_pages
+        page_lines.append(
+            f"  Page {i} ({marker}, layout={page.layout}):{tag} {text}"
+        )
+    return page_lines, image_only_pages
 
 
 def _build_image_only_note(image_only_pages: list[int]) -> str:
@@ -661,7 +670,19 @@ def _parse_transcribe_input(
     False, error)`` when the input is unusable. ``keep_image`` lets
     the agent signal "this image also carries a drawing — don't
     auto-clear it on accept" (default False = Samsung-Notes case)."""
-    page_n = int(input_["page"])
+    raw = input_.get("page")
+    if raw is None:
+        return None, None, False, (
+            "Rejected: 'page' is required — which page should be "
+            "transcribed?"
+        )
+    try:
+        page_n = int(raw)
+    except (TypeError, ValueError):
+        return None, None, False, (
+            f"Rejected: 'page' must be an integer; got {raw!r}. "
+            "Pass the 1-indexed page number."
+        )
     if page_n < 1 or page_n > len(draft.pages):
         return None, None, False, (
             f"Page {page_n} is out of range — the draft has "
