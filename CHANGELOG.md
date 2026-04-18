@@ -1,7 +1,112 @@
 # CHANGELOG
 
 
+## v1.5.0 (2026-04-18)
+
+### Features
+
+- **agent**: Metadata review step + back-cover blurb prompt
+  ([#51](https://github.com/mfozmen/littlepress-ai/pull/51),
+  [`b2c9b11`](https://github.com/mfozmen/littlepress-ai/commit/b2c9b1120e480311fe08486c9ee2ffb6ea7703b0))
+
+* feat(agent): metadata review step + back-cover blurb prompt
+
+P5 from the Yavru Dinozor second-run feedback. The live run dropped both beats: the agent never
+  asked for a back-cover blurb, and it moved straight from the last layout into ``render_book``
+  without giving the user a chance to catch a typo in the title / author / cover pick.
+
+Greeting-only change, no new tools. Two new paragraphs after the cover-options block:
+
+1. "Ask the user for a short back-cover blurb (one or two sentences about what the book is about, in
+  the child's voice — set_metadata with field='back_cover_text'). Leave empty only if the user
+  explicitly says they don't want one."
+
+2. "Once title, author, cover, layouts, and back-cover text are all set, SUMMARISE the metadata back
+  to the user and ask them to approve or correct any of it BEFORE rendering. Call read_draft again
+  if you need to re-check the state. Do NOT jump straight from the last layout to render_book — the
+  review step is the user's last chance to catch a typo before it lands in the printed PDF."
+
+No new tool needed — ``read_draft`` already returns the full state, so the agent re-reads rather
+  than taking a new "review_metadata" tool round.
+
+### Tests (2 new; 522 total, was 520)
+
+- ``test_greeting_includes_metadata_review_step_before_layouts`` — pins the review + approve beat,
+  with independent asserts on the "review / summarise" wording AND the "approve / confirm / ask
+  them" wording so a rewrite can't keep one without the other. -
+  ``test_greeting_asks_for_back_cover_blurb`` — pins both the back-cover prompt and the "short
+  blurb" framing so the agent doesn't push for a full-length description.
+
+### PLAN.md
+
+P5 moved out of Next-up; Shipped row added.
+
+* fix(repl): address PR #51 review — child-voice guard on back cover + README
+
+Six findings: two critical (preserve-child-voice guard missing on the back-cover path, README not
+  updated), four sub-threshold tightening items.
+
+### Critical
+
+1. **Back-cover blurb paragraph advertised ``set_metadata`` with ``field='back_cover_text'`` without
+  a preserve-child-voice guard.** CLAUDE.md explicitly names back-cover text as child-authored. The
+  greeting's "in the child's voice" was ambiguous — a primed LLM reads it as permission to compose a
+  blurb *in the child's style* rather than to transcribe what the user types. ``set_metadata`` has
+  no confirm gate for ``_CHILD_VOICE_FIELDS``, so the greeting is the only enforcement surface.
+  Mirrored the AI-cover guard:
+
+> PRESERVE-CHILD-VOICE: the back cover is child-authored. > Record the user's exact words verbatim —
+  do NOT invent, > paraphrase, or 'improve' the blurb yourself.
+
+2. **README not updated.** New user-visible behaviour on this PR (the back-cover blurb prompt, the
+  final review checkpoint, combined with P4 from last PR which also hadn't landed in the README).
+  Three new Status bullets cover: series question, back-cover blurb (with the verbatim note), and
+  the final review step (with the verbatim quoting).
+
+### Sub-threshold
+
+3. **Render ordering inconsistency.** Greeting said "review after layouts, before render", test
+  docstring said "before the layout step", removed PLAN line said "after metadata". Picked one
+  (layouts → summarise → render) and pinned it with a regex assertion
+  ``re.search(r"layout.*summaris.*render", hint)``.
+
+4. **"SUMMARISE the metadata" risked loose translation in non-English sessions.** Title and author
+  are child-authored; a Turkish session can drift during the summary. Added: "Quote title, author,
+  and back-cover text VERBATIM from what the user stored — do NOT translate or paraphrase them
+  during the summary even if you've switched languages." New test pins the verbatim wording.
+
+5. **Back-cover blurb test accepted lone ``"short"`` keyword** — tightened to require multi-word
+  phrases (``"short blurb"`` / ``"one or two sentences"``) so a rewrite that drops the framing
+  doesn't pass vacuously.
+
+6. **``render_book`` has no confirm gate — the review step is purely agent-instruction.**
+  Acknowledged in this PR as agent-instruction-only; a ``confirm`` gate on ``render_book`` would
+  change the render UX broadly and belongs in its own PR. The greeting is the enforcement surface
+  for the review step, backed by the five regex/keyword pins in ``test_agent_greeting.py``.
+
+### Tests (3 new, 3 tightened — 525 total, was 522)
+
+- ``test_greeting_back_cover_bullet_carries_preserve_child_voice_guard`` — Finding #1. -
+  ``test_greeting_review_step_comes_before_render_and_after_layouts`` — Finding #3 (regex-ordered).
+  - ``test_greeting_summarise_step_demands_verbatim_read_back`` — Finding #4. -
+  ``test_greeting_asks_for_back_cover_blurb`` tightened to require multi-word phrases (Finding #5).
+  - Existing review / recap test renamed to
+  ``test_greeting_includes_metadata_review_step_before_render`` to match the pinned ordering.
+
+README updated with three new Status bullets (series question, back-cover blurb, final review
+  checkpoint).
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+
 ## v1.4.0 (2026-04-18)
+
+### Chores
+
+- **release**: 1.4.0 [skip ci]
+  ([`f304c9d`](https://github.com/mfozmen/littlepress-ai/commit/f304c9dc47e89480f1b3e759ad6d0aad00723c55))
 
 ### Features
 
