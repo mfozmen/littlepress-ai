@@ -2522,6 +2522,42 @@ def test_render_book_surfaces_build_failure(tmp_path, monkeypatch):
     assert "disk full" in result or "failed" in result.lower()
 
 
+def test_render_book_message_explains_the_role_of_each_output_file(tmp_path):
+    """P6 from the Yavru Dinozor second-run feedback — a single
+    render drops four PDFs under ``.book-gen/output/``: stable +
+    versioned × A5 + booklet. The user read four files as "why is
+    this producing so much stuff?" because the success message
+    named paths without roles.
+
+    Tightens the contract: each file's role must be named in the
+    message so the user knows which one to open, which to print
+    double-sided, and which two are rollback snapshots they can
+    safely ignore."""
+    draft = _two_page_draft(tmp_path)
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    result = tool.handler({"impose": True}).lower()
+
+    # Stable A5 — this is the one to open / read.
+    assert "open" in result or "read this" in result
+    # A4 booklet — print double-sided + fold + staple.
+    assert "print" in result
+    assert "double-sided" in result
+    assert "fold" in result
+    assert "staple" in result
+    # Versioned snapshots — labelled as snapshots + as safe to ignore
+    # so the user doesn't hunt through them for the real output.
+    assert "snapshot" in result
+    assert (
+        "safe to ignore" in result
+        or "rollback" in result
+        or "ignore" in result
+    )
+
+
 def test_render_book_returns_absolute_paths_in_message(tmp_path):
     """The agent's reply must include the absolute output paths so the
     user knows exactly where to look — the first end-to-end test had
@@ -2596,7 +2632,7 @@ def test_render_book_viewer_failure_is_non_fatal(tmp_path):
 
     result = tool.handler({})
 
-    assert "Wrote A5 book" in result
+    assert "A5 book written" in result or "Wrote A5 book" in result
     assert (tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf").is_file()
     # The message must not falsely claim the file was opened — it wasn't.
     assert "opened it" not in result.lower()
