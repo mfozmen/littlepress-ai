@@ -1,7 +1,53 @@
 # CHANGELOG
 
 
+## v1.4.0 (2026-04-18)
+
+### Features
+
+- **agent**: Always ask the series question, every book
+  ([#50](https://github.com/mfozmen/littlepress-ai/pull/50),
+  [`0a53a53`](https://github.com/mfozmen/littlepress-ai/commit/0a53a5351b7971b7502e29a4670c9297cdfae753))
+
+P4 from the Yavru Dinozor second-run feedback. The maintainer's call: ask *every* book whether it's
+  part of a series, not only
+
+when the title happens to match a pattern — the user is the source of truth, and "Yavru Dinozor - 1"
+  is book 1 of a series Poyraz plans to continue.
+
+Greeting-only change. No new data fields on ``Draft`` / ``Book``: the user records the answer inside
+  the title they set (e.g. ``Yavru Dinozor - 1``), which the existing cover renderer already lays
+  out correctly. Saves a round-trip through ``set_metadata`` for a value that only shows up on the
+  cover as part of the title anyway.
+
+Adds to ``_AGENT_GREETING_HINT`` after the "do NOT ask a long list of questions up front" line:
+
+ALWAYS ask the user whether this book is part of a series — every book, regardless of what the title
+  looks like (don't try to infer 'yes' from seeing '- 1' or 'Book 2' in the title; the user is the
+  source of truth). If the answer is yes, follow up with the volume number ('which book in the
+  series is this?'). Have the user record that in the title when they set it (e.g. ``Yavru Dinozor -
+  1``) so the cover renderer picks it up naturally.
+
+### Tests (2 new; 520 total, was 518)
+
+- ``test_greeting_always_asks_whether_the_book_is_a_series`` pins the "every book, regardless"
+  behaviour — rejects a rewrite that would scope the question to a title pattern. -
+  ``test_greeting_asks_for_volume_number_when_series_answer_is_yes`` pins the follow-up question so
+  the agent doesn't drop half the interaction.
+
+### PLAN.md
+
+P4 moved out of Next-up; Shipped row added.
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+
 ## v1.3.0 (2026-04-18)
+
+### Chores
+
+- **release**: 1.3.0 [skip ci]
+  ([`42f749b`](https://github.com/mfozmen/littlepress-ai/commit/42f749b1ca2d3dcde6ab2736a13e46625e1f1e5d))
 
 ### Features
 
