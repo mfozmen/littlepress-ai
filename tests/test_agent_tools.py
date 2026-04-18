@@ -1411,60 +1411,67 @@ def test_transcribe_page_downscales_oversized_images_before_sending(tmp_path):
     assert len(payload) < 4 * 1024 * 1024
 
 
-def test_transcribe_page_rejects_blank_image_meta_response(tmp_path):
-    """Live-test finding (Yavru Dinozor): when the PDF carries trailing
-    blank pages (common on Samsung Notes exports), Claude vision
-    honestly replies in English — *"The image appears to be completely
-    blank/white with no visible text to transcribe."* — rather than
-    pretending to transcribe non-existent text. The previous
-    implementation treated that reply as a successful transcription
-    and wrote the English acknowledgement into ``page.text``, which
-    would have been rendered verbatim into the A5 book.
+def test_transcribe_prompt_asks_for_blank_sentinel_on_empty_pages(tmp_path):
+    """PR #47 review #1 — the prose-pattern blank filter was English-
+    only and incomplete (Turkish blank-page variants slipped through,
+    as would "I don't see any text" / "nothing is written" shapes
+    Claude produces). Sentinel approach: the prompt instructs the
+    vision model to reply with exactly ``<BLANK>`` on empty pages,
+    and the tool filters on that token. Language-agnostic, collapses
+    all variants to one check, and a hedged real transcription
+    ("I cannot transcribe the last line with full confidence, but the
+    rest reads: …") never triggers the filter.
 
-    The tool must detect these meta-responses and treat them the same
-    way as an empty reply: leave the draft alone and tell the agent
-    the page is probably blank."""
-    img = _tiny_png(tmp_path / "page-blank.png")
-    draft = Draft(
-        source_pdf=tmp_path / "x.pdf",
-        title="Book",
-        author="A",
-        pages=[DraftPage(text="", image=img)],
-    )
-    llm = _FakeLLM(
-        reply=(
-            "The image appears to be completely blank/white with no "
-            "visible text to transcribe."
-        )
-    )
+    Pin the prompt so a future rewrite can't silently drop the
+    sentinel instruction (which would regress the whole filter)."""
+    draft = _image_only_draft(tmp_path)
+    llm = _FakeLLM(reply="owls")
     tool = transcribe_page_tool(
         get_draft=lambda: draft,
         get_llm=lambda: llm,
         confirm=lambda _p: True,
     )
 
+    tool.handler({"page": 1})
+
+    content = llm.calls[0][0]["content"]
+    prompt = next(b["text"] for b in content if b.get("type") == "text")
+    assert "<BLANK>" in prompt
+    # The instruction has to read as a command, not a descriptive
+    # mention — "exactly", "reply with", or "on empty pages" are
+    # representative.
+    lowered = prompt.lower()
+    assert "exactly" in lowered or "reply with" in lowered
+
+
+def test_transcribe_page_rejects_blank_sentinel_reply(tmp_path):
+    """Primary filter: the prompt asks for the ``<BLANK>`` sentinel
+    on empty pages; when the model complies we leave the draft
+    alone and surface a blank-page signal to the agent."""
+    img = _tiny_png(tmp_path / "p.png")
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Book",
+        author="A",
+        pages=[DraftPage(text="", image=img)],
+    )
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(reply="<BLANK>"),
+        confirm=lambda _p: True,
+    )
+
     result = tool.handler({"page": 1})
 
-    # Draft untouched — the "blank" acknowledgement didn't land in
-    # page.text and wouldn't end up printed on the page.
     assert draft.pages[0].text == ""
-    # Result signals "this page looks blank", not a fake success.
-    lowered = result.lower()
-    assert "blank" in lowered or "empty" in lowered
+    assert "blank" in result.lower() or "empty" in result.lower()
 
 
-def test_transcribe_page_rejects_varied_blank_phrases(tmp_path):
-    """The blank-page filter has to match several phrasings Claude
-    produces for genuinely empty pages — not just the exact wording
-    from the Yavru Dinozor trace. Pin a handful of common shapes so
-    a later rewrite can't silently regress on one."""
-    phrases = [
-        "The image appears to be blank.",
-        "No visible text in the image.",
-        "I cannot transcribe any text — the page is empty.",
-        "There is no text to transcribe on this page.",
-    ]
-    for phrase in phrases:
+def test_transcribe_page_rejects_wrapped_blank_sentinel(tmp_path):
+    """Claude occasionally wraps the sentinel in backticks or quotes
+    (``"`<BLANK>`"``, ``"<BLANK>"``). Those are still clearly the
+    sentinel — strip wrapping before the comparison."""
+    for wrapped in ("`<BLANK>`", '"<BLANK>"', "'<BLANK>'", "  <BLANK>  ", "<BLANK>\n"):
         img = _tiny_png(tmp_path / "p.png")
         draft = Draft(
             source_pdf=tmp_path / "x.pdf",
@@ -1474,41 +1481,102 @@ def test_transcribe_page_rejects_varied_blank_phrases(tmp_path):
         )
         tool = transcribe_page_tool(
             get_draft=lambda: draft,
-            get_llm=lambda: _FakeLLM(reply=phrase),
+            get_llm=lambda: _FakeLLM(reply=wrapped),
             confirm=lambda _p: True,
         )
 
-        result = tool.handler({"page": 1})
+        tool.handler({"page": 1})
 
         assert draft.pages[0].text == "", (
-            f"Blank-page filter should have rejected {phrase!r} but "
-            f"page.text became {draft.pages[0].text!r}."
+            f"Sentinel wrapped as {wrapped!r} must still be recognised "
+            f"as blank, but page.text became {draft.pages[0].text!r}."
         )
-        assert "blank" in result.lower() or "empty" in result.lower()
+
+
+def test_transcribe_page_hedged_transcription_reaches_confirm_gate(tmp_path):
+    """PR #47 review #3 — a hedged but real transcription ("I cannot
+    transcribe the last line with full confidence, but the rest
+    reads: …") must reach the confirm gate rather than getting
+    dropped by an over-eager prose filter. The sentinel-only
+    approach makes this trivially true: anything that isn't the
+    sentinel goes through."""
+    draft = _image_only_draft(tmp_path)
+    hedged = (
+        "I cannot transcribe the last line with full confidence, but "
+        "the rest reads: 'Bir gün bir yumurta çatlamış.'"
+    )
+    seen_prompts: list[str] = []
+
+    def _confirm(prompt):
+        seen_prompts.append(prompt)
+        return True
+
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(reply=hedged),
+        confirm=_confirm,
+    )
+
+    tool.handler({"page": 1})
+
+    # Confirm gate saw the hedged reply (so the user decides), and
+    # approved it lands in page.text — no auto-drop.
+    assert seen_prompts, "confirm gate should have been consulted"
+    assert "cannot transcribe" in seen_prompts[0]
+    assert draft.pages[0].text == hedged
+
+
+def test_transcribe_page_sentinel_approach_is_language_agnostic(tmp_path):
+    """PR #47 review #1, Turkish-coverage angle — the sentinel's
+    whole point is that the filter is language-agnostic. A Turkish
+    blank-page acknowledgement ("Görüntü boş görünüyor.") that
+    **doesn't** contain ``<BLANK>`` doesn't trip the filter, but the
+    confirm gate stops it before it reaches the draft. Documents the
+    intended layered defence: sentinel primary, confirm gate
+    secondary."""
+    draft = _image_only_draft(tmp_path)
+    seen_prompts: list[str] = []
+
+    def _reject(prompt):
+        seen_prompts.append(prompt)
+        return False  # user sees "this looks like a meta-response"
+
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(reply="Görüntü boş görünüyor."),
+        confirm=_reject,
+    )
+
+    tool.handler({"page": 1})
+
+    # Tool-level filter didn't short-circuit (it's only checking the
+    # sentinel), so the confirm gate saw the Turkish meta-reply and
+    # the user rejected it — draft stays clean.
+    assert seen_prompts, "confirm gate must run on non-sentinel replies"
+    assert draft.pages[0].text == ""
 
 
 def test_transcribe_page_does_not_reject_normal_text_with_word_blank(tmp_path):
-    """Guard against false positives: a child's story that happens to
-    include the word "blank" (or "empty") must still transcribe
-    normally — only the whole-reply meta-acknowledgement pattern is
-    filtered, not every reply that contains the word."""
+    """PR #47 review #2 — the previous version of this test passed
+    for the wrong reason: its fixture didn't contain any of the
+    filter's listed phrases, so the test would have passed even if
+    the filter were "fail on any mention of 'blank'". Under the
+    sentinel approach the filter is exact — only the literal
+    sentinel triggers — so story text that contains ``<BLANK>`` as
+    a substring (not as the entire reply) still transcribes."""
     draft = _image_only_draft(tmp_path)
-    llm = _FakeLLM(
-        reply="The page was blank until the dragon drew a moon on it."
-    )
+    # Story text with <BLANK> embedded mid-sentence (the filter's
+    # stripped-exact comparison must not swallow it).
+    story = "The scroll had <BLANK> carved where a name should be."
     tool = transcribe_page_tool(
         get_draft=lambda: draft,
-        get_llm=lambda: llm,
+        get_llm=lambda: _FakeLLM(reply=story),
         confirm=lambda _p: True,
     )
 
     tool.handler({"page": 1})
 
-    # Story text landed in page.text even though it contains "blank".
-    assert (
-        draft.pages[0].text
-        == "The page was blank until the dragon drew a moon on it."
-    )
+    assert draft.pages[0].text == story
 
 
 def test_read_draft_description_points_agent_at_transcribe_page_tool(tmp_path):
