@@ -1,7 +1,112 @@
 # CHANGELOG
 
 
+## v1.2.1 (2026-04-18)
+
+### Bug Fixes
+
+- **agent**: Transcribe_page rejects blank-image meta-responses
+  ([#47](https://github.com/mfozmen/littlepress-ai/pull/47),
+  [`02be7e0`](https://github.com/mfozmen/littlepress-ai/commit/02be7e0860c25bc0e966da2a00f6546403ac50d9))
+
+* fix(agent): transcribe_page rejects blank-image meta-responses
+
+Live test finding (Yavru Dinozor, 8-page Samsung Notes PDF with 5 pages of story + 3 trailing
+  blanks): Claude vision honestly replies in English — *"The image appears to be completely
+  blank/white with no visible text to transcribe."* — when the page carries no text rather than
+  fabricating a transcription. The previous implementation treated those acknowledgements as
+  successful OCR output and wrote the English meta-response verbatim into ``page.text``, so the
+  printed book would have had three pages reading "The image appears to be completely blank/white…"
+  instead of the clean trailing blanks the user expected.
+
+Filter added to ``transcribe_page_tool`` right after the empty-reply guard: if the cleaned reply
+  matches any of the known blank-image meta-phrases (``appears to be blank``, ``appears to be
+  completely blank``, ``no visible text``, ``no text to transcribe``, ``cannot transcribe``, ``is
+  completely blank``, ``appears to be empty``, ``there is no text``), the draft is left untouched
+  and the agent gets a clear signal — "Page N looks blank to the vision model; ask the user whether
+  this page was meant to be empty (trailing blank) or whether they want to skip it / mark it as the
+  back cover." No user confirmation round-trip for this path because nothing is being written; the
+  earlier confirm gate only runs when we have real text to propose.
+
+False-positive coverage: the filter matches the meta-acknowledgement shape, not the word "blank" or
+  "empty" in isolation — a child's story that says "The page was blank until the dragon drew a moon
+  on it" still transcribes. Three new tests:
+
+- ``test_transcribe_page_rejects_blank_image_meta_response`` pins the exact Yavru Dinozor case (full
+  English acknowledgement string). - ``test_transcribe_page_rejects_varied_blank_phrases`` iterates
+  four representative phrasings Claude produces for blank pages — a later rewrite can't silently
+  regress on one. - ``test_transcribe_page_does_not_reject_normal_text_with_word_blank`` guards
+  against false positives on story text that contains the trigger word.
+
+491 tests green (was 488). Companion workaround in the local ``.book-gen/demo_ocr.py`` removed; the
+  tool now handles this correctly without a caller-side filter.
+
+* fix(agent): switch blank-page filter to <BLANK> sentinel
+
+PR #47 review surfaced three related gaps in the prose-pattern filter shipped in the original commit
+  on this branch:
+
+1. **English-only + incomplete.** The 8-phrase list missed real variants (``I don't see any text``,
+  ``nothing is written on this page``, ``the page is blank`` — which didn't match the "appears to
+  be" prefix requirement), and skipped Turkish entirely even though Yavru Dinozor is Turkish. Every
+  additional language / variant would need another phrase. 2. **False-positive test passed for the
+  wrong reason.** The fixture was "The page was blank until the dragon…" which didn't contain any of
+  the 8 listed phrases, so the test couldn't have caught a regression to "fail on any mention of
+  'blank'". 3. **Substring ``cannot transcribe`` could eat hedged transcriptions.** "I cannot
+  transcribe the last line with full confidence, but the rest reads: '…'" matched the filter and the
+  real reply was discarded before the confirm gate ran.
+
+One change fixes all three: replace the phrase list with a **sentinel**. The prompt now tells the
+  vision model to answer blank pages with exactly ``<BLANK>`` — no prose, no explanation — and the
+  filter just checks for that token (with a small amount of wrapping tolerance for backticks /
+  quotes / whitespace).
+
+Properties:
+
+- **Language-agnostic.** Same sentinel regardless of prompt language; Turkish, English, and anything
+  else collapse to one token. - **No false positives on story text.** A story line containing
+  ``<BLANK>`` as a substring inside a longer sentence still transcribes normally — only a reply that
+  *is* the sentinel trips the filter. - **Hedged transcriptions reach the confirm gate.** Anything
+  that isn't the sentinel — including "I cannot transcribe the last line…" — goes through to the
+  user's y/n prompt intact. - **Simpler.** One token, one check. The 8-phrase list is gone.
+
+The confirm gate from PR #46 is still the secondary defence: if a non-compliant model ignores the
+  sentinel instruction and emits prose instead (Gemini sometimes does this), the user sees the
+  meta-response in the confirm preview and rejects it. Layered defence, each layer with a narrow
+  job.
+
+### Tests (6, replacing the 2 prose-pattern tests from the earlier commit)
+
+- ``test_transcribe_prompt_asks_for_blank_sentinel_on_empty_pages`` pins the sentinel instruction in
+  the prompt so a later refactor can't silently drop it. -
+  ``test_transcribe_page_rejects_blank_sentinel_reply`` — exact sentinel → draft untouched. -
+  ``test_transcribe_page_rejects_wrapped_blank_sentinel`` — five common wrappings (backticks,
+  single/double quotes, surrounding whitespace, trailing newline) all recognised. -
+  ``test_transcribe_page_hedged_transcription_reaches_confirm_gate`` — pins the no-auto-drop
+  property for hedged real replies; the confirm gate is called, user decides. -
+  ``test_transcribe_page_sentinel_approach_is_language_agnostic`` — Turkish meta-reply ("Görüntü boş
+  görünüyor.") doesn't trip the tool-level filter but the confirm gate catches it; pins the
+  layered-defence design. - ``test_transcribe_page_does_not_reject_normal_text_with_word_blank``
+  rewritten with a fixture that actually embeds ``<BLANK>`` as a substring — now genuinely tests the
+  false-positive property instead of passing vacuously (addresses review finding #2 directly).
+
+### Live verification
+
+Re-ran the OCR demo against the Yavru Dinozor PDF: Claude complied with the sentinel instruction for
+  pages 6-8 (returned ``<BLANK>``), pages 1-5 transcribed verbatim as before. 494 tests green (was
+  491).
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+
 ## v1.2.0 (2026-04-17)
+
+### Chores
+
+- **release**: 1.2.0 [skip ci]
+  ([`74c3b0d`](https://github.com/mfozmen/littlepress-ai/commit/74c3b0d457af9f268d77dbb7284ac1b3e293a5c3))
 
 ### Features
 
