@@ -21,6 +21,7 @@ All five PRs from the original plan merged:
 | #47 | `fix/ocr-blank-image-metaresponse` | `<BLANK>` sentinel filter on ``transcribe_page``. The prompt now asks the vision model to reply with exactly ``<BLANK>`` on empty pages; the filter checks for that token (with wrapping tolerance). Language-agnostic, no false positives on story text, hedged transcriptions ("I cannot transcribe the last line, but the rest reads…") reach the confirm gate. |
 | #48 | `fix/duplicate-text-and-skip-blank-pages` | P1 — ``transcribe_page`` clears ``page.image`` + sets ``text-only`` layout on approve so Samsung-Notes pages don't print their text twice; ``keep_image=true`` flag for mixed-content pages (child's drawing + typed story). P2 — new ``skip_page(page)`` tool removes blank pages from the draft with y/n confirm + renumber. |
 | TBD | `feat/offer-ai-cover-option` | P3 — tighten ``_AGENT_GREETING_HINT`` to always surface the three cover options (page drawing / AI generation / poster) at the cover step. ``generate_cover_illustration`` stays OpenAI-only; greeting flags the ``/model`` switch for non-OpenAI sessions. |
+| TBD | `feat/always-ask-series-question` | P4 — greeting now tells the agent to ALWAYS ask whether the book is part of a series (every book, regardless of title pattern) and, on a yes, follow up with the volume number. User records the answer in the title they set; no new data fields. |
 
 ## "Done when" checklist
 
@@ -43,7 +44,6 @@ Items below came out of the first real end-to-end test (Yavru Dinozor). Listed r
 
 The first full end-to-end run surfaced several blocking gaps. Shipped in the order below; P1+P2 go together because they're both cleanup of what ``transcribe_page`` leaves behind.
 
-- **P4 — Always ask about series + volume number.** "Yavru Dinozor - 1" is book 1 of a series Poyraz plans to continue. Ask the question *every* book, not just when the title matches a pattern — the maintainer's call, simpler + more explicit. Add ``series_name: str`` + ``volume_number: int | None`` to ``Draft`` + ``set_metadata`` fields, project them into ``Book`` / the cover renderer.
 - **P5 — Metadata review step + back-cover-text prompt.** After collecting title / author / series / cover, the agent should summarise and ask "onaylıyor musun, düzeltmek istediğin var mı?" before moving on. Same round should ask for back-cover text (a short blurb), which this run skipped entirely. Greeting-hint change plus possibly a ``review_metadata`` read-only tool so the LLM can cheaply re-fetch the state.
 - **P6 — Render output is four PDFs, poorly explained.** Every render produces four files under ``.book-gen/output/``: ``<slug>.pdf``, ``<slug>.vN.pdf``, ``<slug>_A4_booklet.pdf``, ``<slug>.vN_A4_booklet.pdf``. That's stable + versioned × A5 + booklet, intentional per PR #30 — but the user sees four files for one render and reads it as a bug. Tighten ``render_book``'s success message to name each file with its role ("open this one", "print this one double-sided", "snapshots for rollback, safe to ignore"), and optionally write a short ``output/README.md`` on first render.
 
