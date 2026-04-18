@@ -151,13 +151,14 @@ def test_greeting_asks_for_volume_number_when_series_answer_is_yes():
     assert "volume" in lowered or "book number" in lowered or "which book" in lowered
 
 
-def test_greeting_includes_metadata_review_step_before_layouts():
-    """P5 from the Yavru Dinozor second-run feedback — the live
-    run silently moved from metadata straight to layouts without
-    summarising what it had collected or letting the user fix a
-    typo in the title / author / series. Agent must read the
-    metadata back to the user and wait for explicit approval
-    before the layout step."""
+def test_greeting_includes_metadata_review_step_before_render():
+    """P5 from the Yavru Dinozor second-run feedback — the live run
+    went straight from the last metadata step into ``render_book``
+    without letting the user catch a typo in the title / author /
+    series / cover / blurb. Agent must summarise everything and
+    wait for approval *before* rendering. The summary step itself
+    comes after layouts (layout decisions are part of what the
+    user reviews)."""
     lowered = _AGENT_GREETING_HINT.lower()
     # Some wording that signals a review / confirm pass over the
     # metadata as a whole.
@@ -172,6 +173,42 @@ def test_greeting_includes_metadata_review_step_before_layouts():
     )
 
 
+def test_greeting_review_step_comes_before_render_and_after_layouts():
+    """PR #51 review #5 — the removed PLAN line, the test docstring,
+    and the greeting body all gave different orderings for the
+    review step. Pick one (after layouts, before render) and pin
+    it with a regex so a later rewrite can't silently reorder."""
+    hint = _AGENT_GREETING_HINT.lower()
+    # "summaris" (covers both -se and -ze spellings) must appear
+    # somewhere after the layouts word and before the render_book
+    # mention. A regex ordering check catches a rewrite that keeps
+    # the keywords but reorders them.
+    import re
+    match = re.search(r"layout.*summaris.*render", hint, re.DOTALL)
+    assert match is not None, (
+        "greeting must mention layouts → summarise → render in that "
+        "order. Current text:\n" + hint
+    )
+
+
+def test_greeting_summarise_step_demands_verbatim_read_back():
+    """PR #51 review #4 — "SUMMARISE the metadata" in a Turkish
+    session can drift into loose translation or paraphrase of the
+    title / author. Title and author are child-authored
+    (preserve-child-voice). The hint must tell the agent to quote
+    stored values verbatim, not rephrase them during the summary."""
+    lowered = _AGENT_GREETING_HINT.lower()
+    # Some verbatim / exact / quote-style wording near the
+    # summarise step.
+    assert (
+        "verbatim" in lowered
+        or "quote" in lowered
+        or "exactly as" in lowered
+        or "do not translate" in lowered
+        or "do not paraphrase" in lowered
+    )
+
+
 def test_greeting_asks_for_back_cover_blurb():
     """P5 — the live run skipped back-cover text entirely; older
     versions asked for it. Put the prompt back in the greeting so
@@ -179,11 +216,39 @@ def test_greeting_asks_for_back_cover_blurb():
     series / cover / back cover)."""
     lowered = _AGENT_GREETING_HINT.lower()
     assert "back cover" in lowered or "back-cover" in lowered
-    # And the "short blurb" framing so the agent doesn't push for
-    # a full-length description.
+    # PR #51 review #6 — the old assertion accepted the lone word
+    # "short", which appears in any number of unrelated places.
+    # Require a multi-word phrase that locks the framing.
     assert (
-        "blurb" in lowered
-        or "short" in lowered
-        or "brief" in lowered
-        or "one or two" in lowered
+        "short blurb" in lowered
+        or "brief blurb" in lowered
+        or "one or two sentence" in lowered
+        or "one-or-two sentence" in lowered
     )
+
+
+def test_greeting_back_cover_bullet_carries_preserve_child_voice_guard():
+    """PR #51 review #1 (critical) — back-cover text is explicitly
+    child-authored per CLAUDE.md. The greeting's "in the child's
+    voice" can be misread by a primed LLM as permission to compose
+    a blurb *in the child's style* rather than to transcribe the
+    user's exact words. ``set_metadata`` has no confirm gate for
+    child-voice fields, so the greeting is the only enforcement
+    surface. Mirror the guard from option (b) of the cover step."""
+    lowered = _AGENT_GREETING_HINT.lower()
+
+    # The blurb bullet must explicitly forbid the agent from
+    # inventing / paraphrasing the text. We check for the bullet
+    # location first (back-cover mention) then the guard nearby.
+    assert "back cover" in lowered or "back-cover" in lowered
+
+    # Same shape of phrasing the AI-cover guard uses.
+    assert (
+        "do not invent" in lowered
+        or "don't invent" in lowered
+        or "do not paraphrase" in lowered
+        or "don't paraphrase" in lowered
+    )
+    # And "preserve-child-voice" named so the link to CLAUDE.md is
+    # unambiguous.
+    assert "preserve-child-voice" in lowered
