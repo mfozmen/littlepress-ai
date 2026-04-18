@@ -149,3 +149,41 @@ def test_greeting_asks_for_volume_number_when_series_answer_is_yes():
     agent doesn't drop one half."""
     lowered = _AGENT_GREETING_HINT.lower()
     assert "volume" in lowered or "book number" in lowered or "which book" in lowered
+
+
+def test_greeting_includes_metadata_review_step_before_layouts():
+    """P5 from the Yavru Dinozor second-run feedback — the live
+    run silently moved from metadata straight to layouts without
+    summarising what it had collected or letting the user fix a
+    typo in the title / author / series. Agent must read the
+    metadata back to the user and wait for explicit approval
+    before the layout step."""
+    lowered = _AGENT_GREETING_HINT.lower()
+    # Some wording that signals a review / confirm pass over the
+    # metadata as a whole.
+    assert "review" in lowered or "summarise" in lowered or "summarize" in lowered or "recap" in lowered
+    # And the explicit "wait for approval" beat so the agent doesn't
+    # only print a summary and barrel on.
+    assert (
+        "approve" in lowered
+        or "confirm" in lowered
+        or "let them correct" in lowered
+        or "ask them" in lowered
+    )
+
+
+def test_greeting_asks_for_back_cover_blurb():
+    """P5 — the live run skipped back-cover text entirely; older
+    versions asked for it. Put the prompt back in the greeting so
+    the agent covers the full metadata scope (title / author /
+    series / cover / back cover)."""
+    lowered = _AGENT_GREETING_HINT.lower()
+    assert "back cover" in lowered or "back-cover" in lowered
+    # And the "short blurb" framing so the agent doesn't push for
+    # a full-length description.
+    assert (
+        "blurb" in lowered
+        or "short" in lowered
+        or "brief" in lowered
+        or "one or two" in lowered
+    )

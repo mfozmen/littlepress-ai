@@ -135,7 +135,18 @@ _AGENT_GREETING_HINT = (
     "quote or paraphrase the child's page text into the image prompt, "
     "or\n"
     "  (c) poster (type-only cover with no drawing — set_cover with "
-    "style='poster')."
+    "style='poster').\n\n"
+    "Ask the user for a short back-cover blurb (one or two sentences "
+    "about what the book is about, in the child's voice — set_metadata "
+    "with field='back_cover_text'). Leave empty only if the user "
+    "explicitly says they don't want one.\n\n"
+    "Once title, author, cover, layouts, and back-cover text are all "
+    "set, SUMMARISE the metadata back to the user (title / author / "
+    "cover style / back-cover text) and ask them to approve or correct "
+    "any of it BEFORE rendering. Call read_draft again if you need to "
+    "re-check the state. Do NOT jump straight from the last layout to "
+    "render_book — the review step is the user's last chance to catch "
+    "a typo before it lands in the printed PDF."
 )
 
 
