@@ -121,3 +121,31 @@ def test_greeting_still_asks_agent_to_read_draft_first():
     is ``read_draft``. Pinned so a future rewrite doesn't strip it."""
     lowered = _AGENT_GREETING_HINT.lower()
     assert "read_draft" in lowered
+
+
+def test_greeting_always_asks_whether_the_book_is_a_series():
+    """P4 from the Yavru Dinozor second-run feedback — maintainer's
+    call: ask the series question on every book, not only when the
+    title parses as a pattern. "Yavru Dinozor - 1" is book 1 of an
+    ongoing series; Poyraz plans book 2, 3, … so the first run must
+    give the agent a chance to capture that.
+
+    The hint must instruct the agent to ask, every time, without
+    peeking at the title first."""
+    lowered = _AGENT_GREETING_HINT.lower()
+    assert "series" in lowered
+    # "Always" / "every" marker so an LLM doesn't infer "only when
+    # the title looks like it's part of a series."
+    assert (
+        "always" in lowered
+        or "every book" in lowered
+        or "regardless" in lowered
+    )
+
+
+def test_greeting_asks_for_volume_number_when_series_answer_is_yes():
+    """The question has two parts: first "is this a series?" and
+    then, only if yes, "which volume?". Pin both branches so the
+    agent doesn't drop one half."""
+    lowered = _AGENT_GREETING_HINT.lower()
+    assert "volume" in lowered or "book number" in lowered or "which book" in lowered
