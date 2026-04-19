@@ -695,25 +695,32 @@ def _openai_user_messages(content) -> list[dict]:
     ``role: tool`` messages keyed by ``tool_call_id``, text blocks
     stay as ``role: user``. An image block triggers OpenAI's
     multi-modal content-array shape: one ``role: user`` message
-    carrying a list of ``{type: "image_url"|"text", ...}`` items
-    (text blocks fold into that array instead of being emitted
-    separately so the model sees text + image together)."""
+    carrying a list of ``{type: "image_url"|"text", ...}`` items.
+    ``tool_result`` blocks in the same user message are always
+    emitted separately as ``role: tool`` messages regardless of
+    whether an image is also present — silent-drop would lose
+    state the agent needs."""
     blocks = list(content or [])
-    if any(b.get("type") == "image" for b in blocks):
-        return [{"role": "user", "content": _openai_multimodal_content(blocks)}]
-    out: list[dict] = []
-    for block in blocks:
-        btype = block.get("type")
-        if btype == "tool_result":
-            out.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": block.get("tool_use_id", ""),
-                    "content": block.get("content", ""),
-                }
-            )
-        elif btype == "text":
-            out.append({"role": "user", "content": block.get("text", "")})
+    out: list[dict] = [
+        {
+            "role": "tool",
+            "tool_call_id": b.get("tool_use_id", ""),
+            "content": b.get("content", ""),
+        }
+        for b in blocks
+        if b.get("type") == "tool_result"
+    ]
+    remaining = [b for b in blocks if b.get("type") != "tool_result"]
+    if any(b.get("type") == "image" for b in remaining):
+        out.append(
+            {"role": "user", "content": _openai_multimodal_content(remaining)}
+        )
+    else:
+        out.extend(
+            {"role": "user", "content": b.get("text", "")}
+            for b in remaining
+            if b.get("type") == "text"
+        )
     return out
 
 
@@ -997,42 +1004,44 @@ def _ollama_user_messages(
     equivalent Ollama sequence — ``tool_result`` blocks become
     ``role: tool`` keyed by ``tool_name`` (not ``tool_call_id``;
     Ollama correlates by function name). Image blocks lift to the
-    message-level ``images`` field (Ollama's multi-modal shape:
-    ``content`` stays as a text string, ``images`` is a parallel
-    list of base64 payloads)."""
+    message-level ``images`` field. ``tool_result`` blocks are
+    always emitted as separate ``role: tool`` messages regardless
+    of whether an image is also present, so an image-carrying
+    user message doesn't silently lose a tool result that happens
+    to share it."""
     blocks = list(content or [])
-    if any(b.get("type") == "image" for b in blocks):
-        texts: list[str] = []
-        images: list[str] = []
-        for block in blocks:
-            btype = block.get("type")
-            if btype == "text":
-                texts.append(block.get("text", ""))
-            elif btype == "image":
-                src = block.get("source", {}) or {}
-                images.append(src.get("data", ""))
-        return [
+    out: list[dict] = [
+        {
+            "role": "tool",
+            "content": b.get("content", ""),
+            "tool_name": id_to_name.get(b.get("tool_use_id", ""), ""),
+        }
+        for b in blocks
+        if b.get("type") == "tool_result"
+    ]
+    remaining = [b for b in blocks if b.get("type") != "tool_result"]
+    if any(b.get("type") == "image" for b in remaining):
+        texts = [
+            b.get("text", "") for b in remaining if b.get("type") == "text"
+        ]
+        images = [
+            (b.get("source", {}) or {}).get("data", "")
+            for b in remaining
+            if b.get("type") == "image"
+        ]
+        out.append(
             {
                 "role": "user",
                 "content": "\n".join(texts),
                 "images": images,
             }
-        ]
-    out: list[dict] = []
-    for block in blocks:
-        btype = block.get("type")
-        if btype == "tool_result":
-            out.append(
-                {
-                    "role": "tool",
-                    "content": block.get("content", ""),
-                    "tool_name": id_to_name.get(
-                        block.get("tool_use_id", ""), ""
-                    ),
-                }
-            )
-        elif btype == "text":
-            out.append({"role": "user", "content": block.get("text", "")})
+        )
+    else:
+        out.extend(
+            {"role": "user", "content": b.get("text", "")}
+            for b in remaining
+            if b.get("type") == "text"
+        )
     return out
 
 

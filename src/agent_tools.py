@@ -579,11 +579,16 @@ def transcribe_page_tool(
 
     Preserve-child-voice is enforced on three axes:
 
-    1. **Provider gate (at REPL).** Only registered when the active
-       provider is Anthropic, because only ``AnthropicProvider.chat``
-       currently forwards image content blocks intact. Other
-       providers' ``_messages_to_*`` translators silently drop image
-       blocks, leading to hallucinated transcriptions.
+    1. **Vision capability required.** Registered on every real
+       provider (Anthropic / OpenAI / Google / Ollama), but the
+       active *model* still has to support vision — Claude 3+,
+       GPT-4o, Gemini 1.5+, LLaVA on Ollama. A non-vision model
+       surfaces as a failed ``llm.chat`` call with a truncated
+       error message in the tool result; it cannot hallucinate a
+       transcription because each provider's message translator
+       now forwards the image content block in its native wire
+       format (OpenAI multi-modal content array, Gemini
+       ``Part(inline_data=Blob(...))``, Ollama ``images`` list).
     2. **User confirmation.** The OCR reply is shown to the user
        *before* landing in ``page.text`` — same y/n pattern as
        ``propose_typo_fix``. An existing transcription is surfaced

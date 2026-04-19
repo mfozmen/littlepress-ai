@@ -413,6 +413,79 @@ def test_messages_to_gemini_converts_image_block_to_inline_data_part():
     assert blob.data == expected_bytes
 
 
+def test_openai_multimodal_message_still_emits_tool_results_separately():
+    """PR #55 review #2 — the image-detecting early return used to
+    skip ``_openai_user_messages``'s tool_result branch entirely,
+    which would silent-drop a tool_result sharing a user message
+    with an image. Defensive fix: tool_results are always emitted
+    first as ``role: tool`` messages, then the remaining image +
+    text blocks become the multi-modal user message."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_42",
+                    "content": "42",
+                },
+                _SAMPLE_IMAGE_BLOCK,
+                {"type": "text", "text": "transcribe"},
+            ],
+        }
+    ]
+
+    out = _messages_to_openai(messages)
+
+    # tool_result came out as a separate role:tool message, not lost.
+    tool_msgs = [m for m in out if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "toolu_42"
+    assert tool_msgs[0]["content"] == "42"
+    # Image + text still land in one multi-modal user message.
+    user_msgs = [m for m in out if m.get("role") == "user"]
+    assert len(user_msgs) == 1
+    assert isinstance(user_msgs[0]["content"], list)
+
+
+def test_ollama_multimodal_message_still_emits_tool_results_separately():
+    """Same invariant as the OpenAI test above, for Ollama's shape
+    (tool_result → ``role: tool`` with ``tool_name``; image → lifted
+    to ``images`` field alongside text ``content``)."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "toolu_42", "name": "get_42"},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_42",
+                    "content": "42",
+                },
+                _SAMPLE_IMAGE_BLOCK,
+                {"type": "text", "text": "transcribe"},
+            ],
+        },
+    ]
+
+    out = _messages_to_ollama(messages)
+
+    tool_msgs = [m for m in out if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["content"] == "42"
+    assert tool_msgs[0]["tool_name"] == "get_42"
+
+    user_msgs = [m for m in out if m.get("role") == "user"]
+    assert len(user_msgs) == 1
+    assert "images" in user_msgs[0]
+    assert user_msgs[0]["images"] == [_SAMPLE_IMAGE_BLOCK["source"]["data"]]
+
+
 def test_parse_ollama_tool_arguments_handles_every_shape():
     """Coverage sweep of ``_parse_ollama_tool_arguments``:
 
