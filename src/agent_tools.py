@@ -1120,11 +1120,15 @@ def _apply_image_cover(draft, style, page_n_raw) -> str:
     return msg + "."
 
 
-# OpenAI ``gpt-image-1`` pricing (portrait 1024x1536, USD, approximate).
-# Drives the confirmation prompt shown to the user; actual billing
-# happens on the user's OpenAI account. Check the current rates at
-# https://openai.com/api/pricing/ when a visible drift is reported.
-_IMAGE_COST_USD = {"low": 0.02, "medium": 0.07, "high": 0.19}
+# OpenAI ``gpt-image-1`` pricing (portrait 1024x1536, USD).
+# APPROXIMATE — last spot-checked against openai.com/api/pricing/ in
+# 2026-Q2. OpenAI quotes per-quality rates for square 1024x1024 and
+# portraits scale ~1.5x. Treat these numbers as advisory; the actual
+# bill lives on the user's OpenAI account. When a user reports a
+# visible drift, re-check the pricing page and update here — both
+# ``generate_cover_illustration`` and ``generate_page_illustration``
+# read from this one constant so the refresh is a single edit.
+_IMAGE_COST_USD = {"low": 0.02, "medium": 0.06, "high": 0.25}
 # A5 covers are ≈ 2:3 portrait. 1024x1536 is the closest portrait size
 # gpt-image-1 supports, and it's what the renderer letterboxes cleanly
 # at A5 without wasted whitespace.
@@ -1192,7 +1196,7 @@ def generate_cover_illustration_tool(
             "prompt. The cover picture may be generated, but the "
             "wording that produces it must not launder the child's "
             "sentences through the image model. 'quality' trades off "
-            "cost vs detail: low ≈ $0.02, medium ≈ $0.07, high ≈ $0.19. "
+            "cost vs detail: low ≈ $0.02, medium ≈ $0.06, high ≈ $0.25. "
             "'style' is optional and picks the cover template; omit it "
             "to leave the current choice alone."
         ),
@@ -1325,7 +1329,7 @@ def generate_page_illustration_tool(
             return error
 
         confirm_msg = _build_page_illustration_confirm_prompt(
-            page_n, prompt, quality, layout
+            page_n, prompt, quality, layout, existing_image=page.image
         )
         if not confirm(confirm_msg):
             return (
@@ -1369,7 +1373,7 @@ def generate_page_illustration_tool(
             "story's themes — do NOT quote or paraphrase the "
             "child's page text into the image prompt. The user is "
             "shown the prompt and the estimated cost (low ≈ $0.02, "
-            "medium ≈ $0.07, high ≈ $0.19 per 1024x1536 portrait) "
+            "medium ≈ $0.06, high ≈ $0.25 per 1024x1536 portrait) "
             "and must confirm before any API call happens. On "
             "approval the PNG is saved into the project and set as "
             "the page's ``image``. An optional ``layout`` switches "
@@ -1389,7 +1393,7 @@ def generate_page_illustration_tool(
                 },
                 "layout": {
                     "type": "string",
-                    "enum": sorted(VALID_LAYOUTS),
+                    "enum": ["image-bottom", "image-full", "image-top"],
                 },
             },
             "required": ["page", "prompt"],
@@ -1444,27 +1448,59 @@ def _parse_page_illustration_fields(
             f"Valid values: {sorted(_IMAGE_COST_USD)}."
         )
     layout = input_.get("layout")
-    if layout is not None and layout not in VALID_LAYOUTS:
+    if layout is None:
+        return prompt, quality, None, None
+    if layout == "text-only":
+        # Choosing ``text-only`` on a tool whose job is to write an
+        # image onto the page is nonsensical — the user pays for a
+        # PNG, the file gets written, ``page.image`` is set, and
+        # then the layout hides it. Reject early before any API call.
         return "", "", None, (
-            f"Invalid layout '{layout}'. Valid layouts: "
-            f"{sorted(VALID_LAYOUTS)}."
+            "Invalid layout 'text-only' for generate_page_illustration: "
+            "this tool writes an image onto the page; a text-only "
+            "layout would pay for the image and then hide it. Pick "
+            "one of: image-top, image-bottom, image-full."
+        )
+    if layout not in VALID_LAYOUTS:
+        return "", "", None, (
+            f"Invalid layout '{layout}'. Valid layouts for pages "
+            "that carry an image: image-top, image-bottom, image-full."
         )
     return prompt, quality, layout, None
 
 
 def _build_page_illustration_confirm_prompt(
-    page_n: int, prompt: str, quality: str, layout: str | None
+    page_n: int,
+    prompt: str,
+    quality: str,
+    layout: str | None,
+    *,
+    existing_image,
 ) -> str:
     cost = _IMAGE_COST_USD[quality]
     layout_line = (
         f"  Layout : {layout}\n" if layout is not None else ""
     )
+    # Overwrite warning: the existing image's draft-level reference
+    # is replaced on approval. The user can reload the PDF to get
+    # a scanned original back, but an earlier AI-generated image
+    # lives only on disk — once ``page.image`` points away from it,
+    # we won't pull it back automatically.
+    if existing_image is not None:
+        overwrite_line = (
+            f"  NOTE: page {page_n} already has an image "
+            f"({existing_image}) and will be REPLACED — the existing "
+            "drawing cannot be recovered in-session.\n"
+        )
+    else:
+        overwrite_line = ""
     return (
         f"Generate an illustration for page {page_n} with OpenAI "
         "gpt-image-1?\n"
         f"  Prompt : {prompt}\n"
         f"  Quality: {quality} (~${cost:.2f})\n"
         f"{layout_line}"
+        f"{overwrite_line}"
         "This will call the OpenAI image API and bill your account."
     )
 

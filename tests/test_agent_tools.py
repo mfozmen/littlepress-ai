@@ -1143,6 +1143,110 @@ def test_generate_page_illustration_rejects_invalid_layout(tmp_path):
     assert "layout" in result.lower() or "cinemascope" in result.lower()
 
 
+def test_generate_page_illustration_rejects_text_only_layout(tmp_path):
+    """PR #57 review #1 — ``text-only`` is a valid draft layout but
+    nonsensical for this tool: the user pays for a PNG, the file
+    gets written + ``page.image`` is set, and then
+    ``page.layout = "text-only"`` hides the image. Reject at the
+    input boundary with a clear alternative."""
+    draft = _draft_with_one_page(tmp_path)
+    provider = _FakeImageProvider()
+    tool = generate_page_illustration_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        image_provider=provider,
+        confirm=lambda _p: True,
+    )
+
+    result = tool.handler(
+        {"page": 1, "prompt": "x", "layout": "text-only"}
+    )
+
+    assert provider.calls == []  # no API call, no cost
+    assert "text-only" in result.lower()
+    # Error points at the real image-carrying options.
+    lowered = result.lower()
+    assert (
+        "image-top" in lowered
+        or "image-bottom" in lowered
+        or "image-full" in lowered
+    )
+    assert draft.pages[0].image is None
+
+
+def test_generate_page_illustration_confirm_warns_when_page_has_existing_image(
+    tmp_path,
+):
+    """PR #57 review #2 — approving silently replaces an existing
+    ``page.image`` (scanned child art, an earlier AI generation, a
+    ``keep_image=true`` preserve). The confirm prompt must name the
+    replacement so the user isn't surprised to lose the old one."""
+    img = _tiny_png(tmp_path / "existing.png")
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Book",
+        author="A",
+        pages=[
+            DraftPage(text="t", image=img, layout="image-top"),
+        ],
+    )
+    seen: list[str] = []
+
+    def _confirm(prompt):
+        seen.append(prompt)
+        return False  # decline so the draft stays as-is
+
+    tool = generate_page_illustration_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        image_provider=_FakeImageProvider(),
+        confirm=_confirm,
+    )
+
+    tool.handler({"page": 1, "prompt": "a new drawing"})
+
+    assert seen, "confirm must be called before any provider round-trip"
+    prompt = seen[0].lower()
+    # A destruction-adjacent phrase naming the existing image.
+    assert (
+        "replace" in prompt
+        or "existing image" in prompt
+        or "already has an image" in prompt
+        or "will be lost" in prompt
+    )
+    # Draft unchanged on decline.
+    assert draft.pages[0].image == img
+
+
+def test_generate_page_illustration_filename_uses_page_n_prefix(tmp_path):
+    """PR #57 review #7 — design intent: ``page-<N>-<hash>.png``
+    so a user can tell which page a PNG in ``.book-gen/images/``
+    belongs to. One-liner pin so a future rewrite can't change the
+    convention silently."""
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Book",
+        author="A",
+        pages=[
+            DraftPage(text="p1", image=None, layout="text-only"),
+            DraftPage(text="p2", image=None, layout="text-only"),
+            DraftPage(text="p3", image=None, layout="text-only"),
+        ],
+    )
+    provider = _FakeImageProvider()
+    tool = generate_page_illustration_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        image_provider=provider,
+        confirm=lambda _p: True,
+    )
+
+    tool.handler({"page": 2, "prompt": "x"})
+
+    assert provider.calls[0]["output_path"].name.startswith("page-2-")
+    assert provider.calls[0]["output_path"].suffix == ".png"
+
+
 def test_generate_page_illustration_handles_missing_or_bad_page_input(
     tmp_path,
 ):
@@ -1290,23 +1394,42 @@ def test_generate_page_illustration_surfaces_provider_error(tmp_path):
 def test_generate_page_illustration_description_has_preserve_child_voice_guard(
     tmp_path,
 ):
-    """Same guard the cover variant carries: don't launder the
-    child's page text into the image prompt."""
+    """PR #57 review #5 tightened: same guard the cover variant
+    carries — but the assertion requires the canonical
+    ``PRESERVE-CHILD-VOICE`` marker AND the full ``"own words"``
+    phrase, not a loose keyword match. A rewrite that drops one
+    half but keeps ``child`` elsewhere can't pass vacuously."""
     tool = generate_page_illustration_tool(
         get_draft=lambda: None,
         get_session_root=lambda: tmp_path,
         image_provider=_FakeImageProvider(),
         confirm=lambda _p: True,
     )
-    desc = tool.description.lower()
+    desc = tool.description
 
-    assert "own words" in desc or "not paraphrase" in desc or "do not paraphrase" in desc
-    assert "child" in desc
+    # Canonical marker used by set_cover + the greeting.
+    assert "PRESERVE-CHILD-VOICE" in desc
+    # And the substantive "your own words" wording.
+    lowered = desc.lower()
+    assert "own words" in lowered
+    # A "do not / don't" near "paraphrase" — the forbidden verb in
+    # the guard. Regex over the sentence so the sentence-boundary
+    # can't accidentally separate the negation from the verb.
+    import re
+    assert re.search(
+        r"\b(do not|don't)\b[^.]{0,80}\bparaphrase\b", lowered
+    ) is not None, (
+        f"Description must forbid paraphrasing near a 'do not' "
+        f"marker; got: {desc!r}"
+    )
 
 
 def test_generate_page_illustration_schema_advertises_page_prompt_quality_layout(
     tmp_path,
 ):
+    """Schema enum for layout lists the three image-carrying
+    layouts only — ``text-only`` would let the agent pay for an
+    image and then hide it (see rejection test)."""
     tool = generate_page_illustration_tool(
         get_draft=lambda: None,
         get_session_root=lambda: tmp_path,
@@ -1318,8 +1441,11 @@ def test_generate_page_illustration_schema_advertises_page_prompt_quality_layout
     assert "page" in props
     assert "prompt" in props
     assert set(props["quality"]["enum"]) == {"low", "medium", "high"}
+    # ``text-only`` is not in the enum — tool rejects it at the
+    # handler too, but keeping it out of the schema stops the LLM
+    # from suggesting it in the first place.
     assert set(props["layout"]["enum"]) == {
-        "image-top", "image-bottom", "image-full", "text-only",
+        "image-top", "image-bottom", "image-full",
     }
     assert set(tool.input_schema["required"]) == {"page", "prompt"}
 
