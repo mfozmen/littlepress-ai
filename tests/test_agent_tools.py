@@ -1352,6 +1352,46 @@ def test_transcribe_page_tesseract_missing_library_returns_clean_error(
     assert draft.pages[0].text == ""
 
 
+def test_transcribe_page_tesseract_empty_reply_surfaces_tesseract_hint(
+    tmp_path, monkeypatch
+):
+    """PR #56 review #4 — an empty Tesseract reply is a different
+    signal than an empty vision reply (no safety filter, no
+    vision-capability story). The message has to name the
+    Tesseract-specific retry advice — different language, higher
+    DPI, switch to ``method='vision'`` — so the user doesn't
+    follow vision advice on a Tesseract failure."""
+    import sys
+    import types as stdtypes
+
+    fake_pytesseract = stdtypes.SimpleNamespace(
+        image_to_string=lambda *_a, **_k: "   ",
+        TesseractNotFoundError=type("TesseractNotFoundError", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_pytesseract)
+
+    draft = _image_only_draft(tmp_path)
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(),
+        confirm=lambda _p: True,
+    )
+
+    result = tool.handler({"page": 1, "method": "tesseract"})
+    lowered = result.lower()
+
+    # Tesseract-specific advice, not the vision "safety filter" line.
+    assert "tesseract" in lowered
+    assert "safety filter" not in lowered
+    # Actionable hints: lang / DPI / switch to vision.
+    assert (
+        "lang" in lowered or "language" in lowered
+        or "dpi" in lowered or "resolution" in lowered
+        or "method='vision'" in lowered or "vision" in lowered
+    )
+    assert draft.pages[0].text == ""
+
+
 def test_transcribe_page_tesseract_empty_reply_does_not_overwrite(
     tmp_path, monkeypatch
 ):
@@ -1383,7 +1423,11 @@ def test_transcribe_page_tesseract_empty_reply_does_not_overwrite(
     result = tool.handler({"page": 1, "method": "tesseract"})
 
     assert draft.pages[0].text == "already here"
-    assert "empty" in result.lower() or "blank" in result.lower()
+    # Tesseract-specific retry advice (PR #56 review #4) — the
+    # exact keywords live in the sibling _surfaces_tesseract_hint
+    # test; here we just pin "didn't mutate + gave the user
+    # something to go on".
+    assert "tesseract" in result.lower() or "no text" in result.lower()
 
 
 def test_transcribe_page_tesseract_binary_missing_returns_clean_error(
@@ -1423,6 +1467,116 @@ def test_transcribe_page_tesseract_binary_missing_returns_clean_error(
     assert "tesseract" in lowered
     assert "install" in lowered or "path" in lowered
     assert draft.pages[0].text == ""
+
+
+def test_transcribe_page_tesseract_rejects_unsafe_lang(tmp_path, monkeypatch):
+    """PR #56 review #5 — ``lang`` forwards to the tesseract CLI's
+    ``-l`` flag via subprocess. Not classic RCE (no ``shell=True``)
+    but bogus values like ``"tur,eng"`` (wrong separator),
+    ``"../foo"`` (traversal), empty string, or ``"--help"`` surface
+    as cryptic binary errors. Allowlist the ISO-639-2 shape:
+    ``[a-z]{3}(+[a-z]{3})*``."""
+    import sys
+    import types as stdtypes
+
+    fake_pytesseract = stdtypes.SimpleNamespace(
+        image_to_string=lambda *_a, **_k: "should not reach here",
+        TesseractNotFoundError=type("TesseractNotFoundError", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_pytesseract)
+
+    draft = _image_only_draft(tmp_path)
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(),
+        confirm=lambda _p: True,
+    )
+
+    for bad_lang in ("", "tur,eng", "../foo", "--help", "TUR/ENG", "x" * 50):
+        result = tool.handler(
+            {"page": 1, "method": "tesseract", "lang": bad_lang}
+        )
+        lowered = result.lower()
+        assert "lang" in lowered or "invalid" in lowered, (
+            f"Bad lang {bad_lang!r} should have been rejected; got: {result!r}"
+        )
+        assert draft.pages[0].text == ""
+
+
+def test_transcribe_page_tesseract_accepts_valid_langs(tmp_path, monkeypatch):
+    """Valid codes go through verbatim: ``eng``, ``tur``,
+    ``tur+eng``, ``tur+eng+deu``."""
+    import sys
+    import types as stdtypes
+
+    captured: list = []
+
+    def _capture(image, lang="eng"):
+        captured.append(lang)
+        return "ok"
+
+    fake_pytesseract = stdtypes.SimpleNamespace(
+        image_to_string=_capture,
+        TesseractNotFoundError=type("TesseractNotFoundError", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_pytesseract)
+
+    draft = _image_only_draft(tmp_path)
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(),
+        confirm=lambda _p: False,  # decline so draft stays empty
+    )
+
+    for good_lang in ("eng", "tur", "tur+eng", "tur+eng+deu"):
+        tool.handler({"page": 1, "method": "tesseract", "lang": good_lang})
+
+    assert captured == ["eng", "tur", "tur+eng", "tur+eng+deu"]
+
+
+def test_transcribe_page_tesseract_unrelated_exception_not_mislabeled_as_binary_missing(
+    tmp_path, monkeypatch
+):
+    """PR #56 review #7 — the ``except tess_not_found`` fallback to
+    bare ``Exception`` converted every pytesseract failure (OOM,
+    permission, decode) into the "tesseract binary not on PATH"
+    install hint. Now: ``TesseractNotFoundError`` via
+    ``isinstance`` check so unrelated exceptions fall through to
+    the generic error branch with their own message."""
+    import sys
+    import types as stdtypes
+
+    class _PermissionBoom(Exception):
+        pass
+
+    def _raise_other(*_a, **_k):
+        raise _PermissionBoom("some permission thing")
+
+    # NB: TesseractNotFoundError IS defined on the fake package,
+    # but the raised exception is a completely unrelated class.
+    fake_pytesseract = stdtypes.SimpleNamespace(
+        image_to_string=_raise_other,
+        TesseractNotFoundError=type("TesseractNotFoundError", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_pytesseract)
+
+    draft = _image_only_draft(tmp_path)
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(),
+        confirm=lambda _p: True,
+    )
+
+    result = tool.handler({"page": 1, "method": "tesseract"})
+    lowered = result.lower()
+
+    # The error message must NOT claim the binary is missing from
+    # PATH (that's the wrong diagnosis for an OOM / permission
+    # error).
+    assert "not found on path" not in lowered
+    assert "binary not found" not in lowered
+    # It should surface the actual error text the user can search for.
+    assert "permission thing" in lowered
 
 
 def test_transcribe_page_schema_advertises_method_and_lang(tmp_path):

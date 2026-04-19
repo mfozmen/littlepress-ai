@@ -615,6 +615,9 @@ def transcribe_page_tool(
             )
         if method == "tesseract":
             lang = str(input_.get("lang", "eng"))
+            lang_error = _validate_tesseract_lang(lang)
+            if lang_error is not None:
+                return lang_error
             cleaned, error = _call_tesseract_for_transcription(
                 Path(page.image), page_n, lang
             )
@@ -624,7 +627,7 @@ def transcribe_page_tool(
             )
         if error is not None:
             return error
-        early = _interpret_vision_reply(cleaned, page_n)
+        early = _interpret_reply(cleaned, page_n, method)
         if early is not None:
             return early
         prompt_msg = _build_transcribe_confirm_prompt(
@@ -646,28 +649,31 @@ def transcribe_page_tool(
             "the embedded text layer is empty but the image clearly "
             "shows words. Two OCR engines via ``method``: 'vision' "
             "(default) goes through the active LLM's vision "
-            "capability, 'tesseract' goes through an offline "
-            "pytesseract install (zero API cost, great for "
-            "matbaa yazısı, weaker on handwriting). Prefer "
-            "'tesseract' for Samsung-Notes-style matbaa PDFs and "
-            "pass ``lang='tur'`` (or 'eng', 'tur+eng', etc.). "
+            "capability, 'tesseract' goes through a local pytesseract "
+            "install (zero API cost, works offline, strong on typeset "
+            "printed text like Turkish matbaa yazısı, noticeably "
+            "weaker on handwriting). Prefer 'tesseract' for clean "
+            "typed pages and pass ``lang='tur'`` (or 'eng', "
+            "'tur+eng', etc., three-letter ISO-639-2/B codes). "
             "Preserve-child-voice: the vision prompt tells the model "
             "to copy the text verbatim (no typo fixes, no "
-            "paraphrase); Tesseract returns bytes and can't "
-            "paraphrase at all. Either way the user must approve "
-            "the OCR reply via a y/n prompt before it lands in the "
+            "paraphrase); Tesseract is a classical OCR engine — it "
+            "will misread characters (diacritics, punctuation) but "
+            "won't rewrite or summarise, and the y/n confirm gate is "
+            "the real preserve-child-voice guard either way. The "
+            "user must approve the OCR reply before it lands in the "
             "draft — same gate pattern as propose_typo_fix. SIDE "
             "EFFECT: by default, approving also clears the page's "
-            "source image and switches the layout to ``text-only`` "
-            "(Samsung-Notes case). Pass ``keep_image=true`` on "
-            "mixed-content pages where the image also carries a "
-            "drawing you want to keep. Vision-method registered on "
-            "every real provider (Anthropic / OpenAI / Google / "
-            "Ollama); a non-vision model surfaces as a failed chat "
-            "call. Tesseract method needs pytesseract + a system "
-            "tesseract binary + matching traineddata installed — "
-            "when they're missing the tool surfaces a clean install "
-            "hint rather than a crash."
+            "source image and switches the layout to ``text-only``. "
+            "Pass ``keep_image=true`` on mixed-content pages where "
+            "the image also carries a drawing you want to keep. "
+            "Vision-method registered on every real provider "
+            "(Anthropic / OpenAI / Google / Ollama); a non-vision "
+            "model surfaces as a failed chat call. Tesseract method "
+            "needs ``pip install 'littlepress-ai[tesseract]'`` plus "
+            "a system tesseract binary + matching traineddata — when "
+            "they're missing the tool surfaces a clean install hint "
+            "rather than a crash."
         ),
         input_schema={
             "type": "object",
@@ -690,8 +696,8 @@ def transcribe_page_tool(
                         "OCR engine. Default 'vision' — uses the "
                         "active LLM's vision capability. 'tesseract' "
                         "routes through a local pytesseract install "
-                        "(zero API cost, offline, excellent on "
-                        "matbaa yazısı; handwriting is shakier). "
+                        "(zero API cost, offline, strong on typeset "
+                        "printed text; handwriting is shakier). "
                         "Requires both the pytesseract package AND "
                         "the system tesseract binary with the "
                         "matching language trained-data installed."
@@ -784,45 +790,77 @@ def _call_vision_for_transcription(
     return str(reply).strip(), None
 
 
+import re as _re
+
+# Tesseract's ``-l`` flag takes ISO-639-2/B codes ("eng", "tur") or a
+# ``+``-joined list ("tur+eng"). Anything else — wrong separator,
+# path traversal, CLI flag injection, stray casing — gets rejected at
+# the tool boundary rather than reaching the CLI as a mysterious
+# error. Three-letter lower-case codes only, optionally joined with
+# a single ``+``.
+_TESSERACT_LANG_RE = _re.compile(r"^[a-z]{3}(\+[a-z]{3})*$")
+
+
+def _validate_tesseract_lang(lang: str) -> str | None:
+    """Reject ``lang`` strings that don't look like one or more
+    ISO-639-2/B codes. Returns a tool-result error message for the
+    agent or ``None`` when the lang is shaped right."""
+    if not _TESSERACT_LANG_RE.fullmatch(lang or ""):
+        return (
+            f"Invalid lang '{lang}'. Tesseract expects a three-letter "
+            "ISO-639-2/B code, optionally ``+``-joined (e.g. 'eng', "
+            "'tur', 'tur+eng'). Each code needs the matching "
+            "traineddata pack installed on the system."
+        )
+    return None
+
+
 def _call_tesseract_for_transcription(
     image_path: Path, page_n: int, lang: str
 ) -> tuple[str, str | None]:
     """Run offline OCR via pytesseract and normalise errors into
-    ``(cleaned_reply, None)`` or ``("", error_message)``. Two
+    ``(cleaned_reply, None)`` or ``("", error_message)``. Three
     distinct failure modes get their own clean-error message:
-    ``pytesseract`` not installed (Python package), and the system
-    ``tesseract`` binary not on PATH (the package's
-    ``TesseractNotFoundError``).
+    ``pytesseract`` not installed (Python package), the system
+    ``tesseract`` binary not on PATH, and any other exception from
+    the OCR call.
 
     Tesseract is the fast + free path for Samsung-Notes-style
-    matbaa yazısı where LLM vision would cost a cloud round-trip
-    per page. Handwriting still needs an LLM."""
+    typeset text (Turkish "matbaa yazısı") where LLM vision would
+    cost a cloud round-trip per page. Handwriting still needs an
+    LLM — classical OCR is shaky on it."""
     try:
         import pytesseract  # type: ignore[import-not-found]
     except ImportError:
         return "", (
             f"Transcription failed on page {page_n}: pytesseract is "
-            "not installed. Install it with ``pip install pytesseract`` "
-            "(and a system tesseract binary with your language "
-            "trained-data, e.g. tesseract-lang-tur on Ubuntu or via "
-            "UB-Mannheim on Windows), or retry with method='vision'."
+            "not installed. Install it with "
+            "``pip install 'littlepress-ai[tesseract]'`` (and a "
+            "system tesseract binary with your language trained-data, "
+            "e.g. ``tesseract-ocr-tur`` on Ubuntu or via UB-Mannheim "
+            "on Windows), or retry with method='vision'."
         )
 
-    tess_not_found = getattr(
-        pytesseract, "TesseractNotFoundError", Exception
-    )
+    # Run the image through PIL first so a broken PNG surfaces as a
+    # clean decode error rather than garbage OCR, and so the
+    # pytesseract temp-file shim handles Windows long-path /
+    # non-ASCII filenames the same way the vision path does.
+    tess_not_found = getattr(pytesseract, "TesseractNotFoundError", None)
     try:
-        reply = pytesseract.image_to_string(str(image_path), lang=lang)
-    except tess_not_found as e:  # type: ignore[misc]
-        return "", (
-            f"Transcription failed on page {page_n}: tesseract binary "
-            "not found on PATH. Install the system package (Windows: "
-            "UB-Mannheim installer; macOS: ``brew install tesseract "
-            "tesseract-lang``; Linux: ``apt install tesseract-ocr "
-            "tesseract-ocr-tur``), or retry with method='vision'. "
-            f"({str(e)[:200]})"
-        )
-    except Exception as e:  # noqa: BLE001 — surface every other tesseract error
+        from PIL import Image
+
+        with Image.open(image_path) as img:
+            reply = pytesseract.image_to_string(img, lang=lang)
+    except Exception as e:  # noqa: BLE001 — surface every tesseract error
+        if tess_not_found is not None and isinstance(e, tess_not_found):
+            return "", (
+                f"Transcription failed on page {page_n}: tesseract "
+                "binary not found on PATH. Install the system package "
+                "(Windows: UB-Mannheim installer; macOS: "
+                "``brew install tesseract tesseract-lang``; Linux: "
+                "``apt install tesseract-ocr tesseract-ocr-tur``), or "
+                f"retry with method='vision'. ({str(e)[:200]})"
+            )
         return "", (
             f"Transcription failed on page {page_n}: tesseract error: "
             f"{str(e)[:200]}. Try method='vision' for a cloud fallback."
@@ -830,12 +868,24 @@ def _call_tesseract_for_transcription(
     return str(reply).strip(), None
 
 
-def _interpret_vision_reply(cleaned: str, page_n: int) -> str | None:
+def _interpret_reply(cleaned: str, page_n: int, method: str) -> str | None:
     """Early-return message for the two non-transcription replies:
-    an empty string (safety filter) and the ``<BLANK>`` sentinel
-    (truly blank page). Returns ``None`` when the reply is a real
-    transcription the handler should forward to the confirm gate."""
+    an empty string (safety filter / OCR failure) and the
+    ``<BLANK>`` sentinel (truly blank page, vision-only). Returns
+    ``None`` when the reply is a real transcription the handler
+    should forward to the confirm gate. The empty-reply wording
+    branches on ``method`` — Tesseract failures are not safety
+    filters, and the retry advice is different."""
     if not cleaned:
+        if method == "tesseract":
+            return (
+                f"Transcription failed on page {page_n}: tesseract "
+                "returned no text. The image may have low contrast, "
+                "too low a DPI, or the wrong ``lang`` trained-data "
+                "for what's actually on the page. Try a different "
+                "``lang``, a higher-resolution source, or switch to "
+                "method='vision' for a cloud OCR pass."
+            )
         return (
             f"Transcription failed on page {page_n}: provider "
             "returned empty text (often a safety filter or a "
