@@ -606,25 +606,7 @@ def transcribe_page_tool(
         if error is not None:
             return error
         method = str(input_.get("method", "vision"))
-        if method not in {"vision", "tesseract"}:
-            return (
-                f"Invalid method '{method}'. Valid values: "
-                "'vision' (default; uses the active LLM) and "
-                "'tesseract' (offline OCR, requires pytesseract + a "
-                "system tesseract binary)."
-            )
-        if method == "tesseract":
-            lang = str(input_.get("lang", "eng"))
-            lang_error = _validate_tesseract_lang(lang)
-            if lang_error is not None:
-                return lang_error
-            cleaned, error = _call_tesseract_for_transcription(
-                Path(page.image), page_n, lang
-            )
-        else:
-            cleaned, error = _call_vision_for_transcription(
-                get_llm(), Path(page.image), page_n
-            )
+        cleaned, error = _run_ocr_engine(method, input_, page, page_n, get_llm)
         if error is not None:
             return error
         early = _interpret_reply(cleaned, page_n, method)
@@ -788,6 +770,35 @@ def _call_vision_for_transcription(
             "manually, or switch to a multimodal provider via /model."
         )
     return str(reply).strip(), None
+
+
+def _run_ocr_engine(
+    method: str, input_: dict, page, page_n: int, get_llm
+) -> tuple[str, str | None]:
+    """Dispatch the OCR call to whichever engine ``method`` names.
+    Validates ``method`` + ``lang`` at the boundary so the handler
+    stays a short linear script. Returns ``(cleaned_reply, None)``
+    on success or ``("", error_message)`` on any validation or
+    engine failure — same shape the underlying ``_call_*``
+    helpers use."""
+    if method not in {"vision", "tesseract"}:
+        return "", (
+            f"Invalid method '{method}'. Valid values: "
+            "'vision' (default; uses the active LLM) and "
+            "'tesseract' (offline OCR, requires pytesseract + a "
+            "system tesseract binary)."
+        )
+    if method == "tesseract":
+        lang = str(input_.get("lang", "eng"))
+        lang_error = _validate_tesseract_lang(lang)
+        if lang_error is not None:
+            return "", lang_error
+        return _call_tesseract_for_transcription(
+            Path(page.image), page_n, lang
+        )
+    return _call_vision_for_transcription(
+        get_llm(), Path(page.image), page_n
+    )
 
 
 import re as _re
