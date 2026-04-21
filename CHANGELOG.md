@@ -1,7 +1,85 @@
 # CHANGELOG
 
 
+## v1.10.0 (2026-04-21)
+
+### Features
+
+- **cleanup**: Auto-prune orphan images and old render snapshots
+  ([#58](https://github.com/mfozmen/littlepress-ai/pull/58),
+  [`cc9835b`](https://github.com/mfozmen/littlepress-ai/commit/cc9835b92686c5cec2e567c7425506eb00555912))
+
+* feat(cleanup): auto-prune orphan images and old render snapshots
+
+New src/prune.py drops PNGs under .book-gen/images/ that aren't referenced by the current draft
+  (retry leftovers from generate_*_illustration calls) and snapshot PDFs beyond the most-recent keep
+  versions (default 3). Auto-runs after every versioned render from both the agent tool and the REPL
+  /render command; a new /prune [--dry-run] [--keep N] slash command exposes the same logic
+  manually. Stable <slug>.pdf / <slug>_A4_booklet.pdf pointers, .book-gen/input/, and referenced
+  cover/page images are never touched.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(cleanup): address PR #58 review — preserve child drawings, tighten guards
+
+Four behaviour changes from the review:
+
+- Narrow orphaned_images() to only match AI-generated filenames (cover-<10-hex>.png /
+  page-<10-hex>.png). The child's extracted drawings (page-NN.png from pdf_ingest.extract_images)
+  are now preserved even when the draft no longer references them — e.g. after transcribe_page
+  clears the page.image for a Samsung-Notes screenshot. Without this guard an auto-prune on the next
+  render would silently destroy the child's art, violating the core "child is the author" stance in
+  CLAUDE.md. - Reject /prune --keep 0 (and negatives). The usage message promises "positive
+  integer"; 0 would quietly wipe every snapshot. - prune() now truly swallows unexpected errors at
+  the call boundary. A failure in the housekeeping hook at the end of render_book must never mask a
+  successful render — the user already has their PDF on disk. - Cover _parse_prune_args error
+  branches with tests (unknown token, bare --keep, non-integer, negative, zero).
+
+Plus CLAUDE.md now documents src/prune.py and the render-time side-effect alongside the other src/
+  modules.
+
+* fix(cleanup): match real page-illustration filenames in prune regex
+
+Reviewer round 2 on PR #58 caught that ``_AI_IMAGE_PATTERN`` missed the page-illustration shape
+  entirely. ``generate_page_illustration`` calls ``_hashed_image_output_path`` with a prefix of
+  ``f"page-{page_n}"``, so the filenames are ``page-<N>-<10hex>.png`` (e.g.
+  ``page-1-abcdef0123.png``) — but the regex required exactly ``page-<10hex>.png``, matching only
+  the cover case.
+
+Net effect: page retries (the dominant accumulator — 8 pages x 3 retries ≈ 24 images per book per
+  the PR motivation) silently accumulated forever. Covers pruned correctly. The original regression
+  test only exercised the cover path and so didn't catch it.
+
+Fix: regex now reads ``^(?:cover|page-\d+)-[0-9a-f]{10}\.png$``. The
+
+regression test grows two new cases (``page-1-<hex>.png`` and ``page-15-<hex>.png``) that prove both
+  page-retry shapes are pruned, while the child's ``page-NN.png`` drawings and user-dropped custom
+  assets are still preserved.
+
+Also expanded the module docstring's "never touched" section to explicitly name the child's
+  extracted drawings — the core preserve-child-voice invariant that ``_AI_IMAGE_PATTERN`` exists to
+  enforce belongs in the module contract, not only in a private helper's docstring.
+
+* docs(prune): sync orphaned_images() docstring with page-N-hex shape
+
+Reviewer round 3 on PR #58 caught that ``orphaned_images()``'s own docstring still described the
+  pre-round-2 convention (``page-<10-hex>.png``) even though the regex, sibling comment, and module
+  docstring all moved to ``page-<N>-<10hex>.png`` in 9e33fbb. Code is correct; the drift was inside
+  the function's docstring example only.
+
+---------
+
+Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.9.0 (2026-04-19)
+
+### Chores
+
+- **release**: 1.9.0 [skip ci]
+  ([`e954b3c`](https://github.com/mfozmen/littlepress-ai/commit/e954b3c67aae3bb25295f021f358e9903c7cc42d))
 
 ### Features
 
