@@ -1,0 +1,137 @@
+"""Housekeeping for ``.book-gen/`` — removes orphan images and old
+render snapshots so iterative use doesn't balloon disk use.
+
+What gets pruned:
+
+- ``images/*.png`` that are not referenced as ``draft.cover_image`` or
+  as any ``page.image``. These are left behind by
+  ``generate_cover_illustration`` / ``generate_page_illustration``
+  retries (the ``time_ns()`` token in the filename hash means identical
+  prompts still produce new files).
+- ``output/<slug>.vN.pdf`` and ``output/<slug>.vN_A4_booklet.pdf``
+  snapshots beyond the most-recent ``keep`` versions.
+
+What is never touched: ``input/`` (user's source PDFs), the stable
+``<slug>.pdf`` / ``<slug>_A4_booklet.pdf`` pointers, ``draft.json``,
+``session.json``.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from src.draft import Draft, slugify
+
+
+@dataclass
+class PruneReport:
+    """What a ``prune()`` call would remove (or did, when not a dry run)."""
+
+    images_removed: list[Path] = field(default_factory=list)
+    snapshots_removed: list[Path] = field(default_factory=list)
+    bytes_freed: int = 0
+
+    @property
+    def empty(self) -> bool:
+        return not self.images_removed and not self.snapshots_removed
+
+
+def _referenced_paths(draft: Draft) -> set[Path]:
+    refs: set[Path] = set()
+    if draft.cover_image is not None:
+        refs.add(Path(draft.cover_image).resolve())
+    for page in draft.pages:
+        if page.image is not None:
+            refs.add(Path(page.image).resolve())
+    return refs
+
+
+def orphaned_images(images_dir: Path, draft: Draft) -> list[Path]:
+    """Return PNGs under ``images_dir`` not referenced by ``draft``.
+
+    Ignores non-PNG files so a user's stray note or non-tool-generated
+    asset is never deleted. Missing ``images_dir`` returns ``[]``.
+    """
+    images_dir = Path(images_dir)
+    if not images_dir.is_dir():
+        return []
+    refs = _referenced_paths(draft)
+    return [p for p in images_dir.glob("*.png") if p.resolve() not in refs]
+
+
+def excess_snapshots(output_dir: Path, slug: str, keep: int) -> list[Path]:
+    """Return snapshot files for ``slug`` beyond the most-recent ``keep``.
+
+    Matches both the A5 (``<slug>.vN.pdf``) and booklet
+    (``<slug>.vN_A4_booklet.pdf``) for the same version — versions are
+    ranked as a pair. Only full versions count against ``keep``; a
+    booklet-less gap (bare ``/render`` at v1 followed by
+    ``--impose`` at v2) still counts as one version.
+
+    Stable pointers (``<slug>.pdf``, ``<slug>_A4_booklet.pdf``) are
+    never returned — they're the "file to open" and must survive any
+    prune. Files belonging to other slugs are ignored.
+    """
+    output_dir = Path(output_dir)
+    if not output_dir.is_dir():
+        return []
+    pattern = re.compile(rf"^{re.escape(slug)}\.v(\d+)(?:_A4_booklet)?\.pdf$")
+    by_version: dict[int, list[Path]] = {}
+    for path in output_dir.iterdir():
+        m = pattern.match(path.name)
+        if m:
+            by_version.setdefault(int(m.group(1)), []).append(path)
+    if not by_version:
+        return []
+    versions_oldest_first = sorted(by_version)
+    drop_versions = versions_oldest_first[: max(len(versions_oldest_first) - keep, 0)]
+    return [p for v in drop_versions for p in by_version[v]]
+
+
+def prune(
+    session_root: Path,
+    draft: Draft,
+    keep: int = 3,
+    dry_run: bool = False,
+) -> PruneReport:
+    """Remove orphan images and old snapshots under ``session_root``.
+
+    ``session_root`` is the project directory (the parent of
+    ``.book-gen/``). Snapshots for the draft's slug (from
+    ``slugify(draft.title)``) beyond the most-recent ``keep`` are
+    removed; an empty title means no snapshots can be matched and only
+    images are pruned.
+
+    ``dry_run=True`` reports what would be removed without touching
+    disk — the report still sums ``bytes_freed`` so the caller can show
+    a meaningful preview.
+    """
+    session_root = Path(session_root)
+    images_dir = session_root / ".book-gen" / "images"
+    output_dir = session_root / ".book-gen" / "output"
+
+    report = PruneReport()
+    report.images_removed = orphaned_images(images_dir, draft)
+    slug = slugify(draft.title) if draft.title.strip() else ""
+    if slug:
+        report.snapshots_removed = excess_snapshots(output_dir, slug, keep=keep)
+
+    for path in (*report.images_removed, *report.snapshots_removed):
+        try:
+            report.bytes_freed += path.stat().st_size
+        except OSError:
+            # Missing stat is benign — just don't count it.
+            pass
+
+    if not dry_run:
+        for path in (*report.images_removed, *report.snapshots_removed):
+            try:
+                path.unlink()
+            except OSError:
+                # A locked file on Windows (PDF open in a viewer) is the
+                # main realistic failure. Skip and move on; the next
+                # prune will catch it.
+                pass
+    return report
