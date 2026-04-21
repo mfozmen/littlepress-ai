@@ -78,7 +78,7 @@ def orphaned_images(images_dir: Path, draft: Draft) -> list[Path]:
     the draft.
 
     Only files matching the ``_hashed_image_output_path`` naming
-    convention (``cover-<10-hex>.png`` / ``page-<10-hex>.png``) are
+    convention (``cover-<10hex>.png`` / ``page-<N>-<10hex>.png``) are
     candidates. The child's original drawings extracted by
     ``pdf_ingest`` use a ``page-NN.png`` shape and are always
     preserved — losing them would silently destroy the child's art
