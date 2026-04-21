@@ -350,3 +350,19 @@ def test_draft_page_can_be_hidden():
     page = DraftPage(text="hi", hidden=True)
 
     assert page.hidden is True
+
+
+def test_to_book_excludes_hidden_pages(tmp_path):
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Story",
+        pages=[
+            DraftPage(text="page 1"),
+            DraftPage(text="page 2", hidden=True),
+            DraftPage(text="page 3"),
+        ],
+    )
+
+    book = to_book(draft, tmp_path)
+
+    assert [p.text for p in book.pages] == ["page 1", "page 3"]

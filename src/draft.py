@@ -216,6 +216,8 @@ def to_book(draft: Draft, source_dir: Path) -> Book:
 
     schema_pages: list[Page] = []
     for p in draft.pages:
+        if p.hidden:
+            continue
         image_str = _rel(p.image)
         # Rule 1 of .claude/skills/select-page-layout: pages with no image
         # must render as text-only. Other pages keep the draft's layout
