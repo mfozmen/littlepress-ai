@@ -391,6 +391,52 @@ def set_metadata_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     )
 
 
+def apply_text_correction_tool(get_draft: Callable[[], Draft | None]) -> Tool:
+    """Tool: overwrite a page's text verbatim with a user-provided string.
+
+    Intended for the post-render review turn: when the user says
+    'page 3 text: <verbatim>', the agent calls this tool with the
+    exact string. No model, no prompt, no heuristics — the incoming
+    ``text`` is written straight into ``page.text``. The agent MUST
+    NOT initiate this tool on its own; it is a user-initiated
+    correction path.
+    """
+
+    def handler(input_: dict) -> str:
+        draft = get_draft()
+        if draft is None:
+            return _MSG_NO_DRAFT
+        page_n = int(input_["page"])
+        text = input_["text"]
+        if page_n < 1 or page_n > len(draft.pages):
+            return (
+                f"Page {page_n} is out of range — the draft has "
+                f"{len(draft.pages)} pages."
+            )
+        draft.pages[page_n - 1].text = text
+        return f"Page {page_n} text updated (verbatim, {len(text)} chars)."
+
+    return Tool(
+        name="apply_text_correction",
+        description=(
+            "Replace the text of page N with the user-provided string, "
+            "verbatim. Use this ONLY during the post-render review turn "
+            "when the user says 'page N text: ...'. Do not invent or "
+            "paraphrase — the ``text`` field is written into page.text "
+            "exactly as passed in. Never call on your own initiative."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "minimum": 1},
+                "text": {"type": "string"},
+            },
+            "required": ["page", "text"],
+        },
+        handler=handler,
+    )
+
+
 def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     """Tool: pick a page's drawing as the cover image and, optionally,
     the cover style template.

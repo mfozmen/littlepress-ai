@@ -3804,3 +3804,48 @@ def test_open_in_default_viewer_uses_xdg_open_on_linux(monkeypatch, tmp_path):
     # start_new_session prevents a zombie child if the caller exits
     # before xdg-open's grandchild reparents itself.
     assert kw.get("start_new_session") is True
+
+
+def test_apply_text_correction_writes_verbatim(tmp_path):
+    from src.agent_tools import apply_text_correction_tool
+
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="old text"), DraftPage(text="p2")],
+    )
+    tool = apply_text_correction_tool(get_draft=lambda: draft)
+
+    result = tool.handler({"page": 1, "text": "Bir gün bir yumurta çatlamış"})
+
+    assert draft.pages[0].text == "Bir gün bir yumurta çatlamış"
+    assert "page 1" in result.lower()
+
+
+def test_apply_text_correction_preserves_unicode_and_whitespace(tmp_path):
+    from src.agent_tools import apply_text_correction_tool
+
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="old")],
+    )
+    tool = apply_text_correction_tool(get_draft=lambda: draft)
+
+    payload = "İlk satır\nİkinci satır   (with trailing space) "
+    tool.handler({"page": 1, "text": payload})
+
+    assert draft.pages[0].text == payload
+
+
+def test_apply_text_correction_rejects_out_of_range(tmp_path):
+    from src.agent_tools import apply_text_correction_tool
+
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="p1")],
+    )
+    tool = apply_text_correction_tool(get_draft=lambda: draft)
+
+    result = tool.handler({"page": 5, "text": "..."})
+
+    assert "out of range" in result.lower()
+    assert draft.pages[0].text == "p1"  # unchanged
