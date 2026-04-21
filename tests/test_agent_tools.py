@@ -3849,3 +3849,67 @@ def test_apply_text_correction_rejects_out_of_range(tmp_path):
 
     assert "out of range" in result.lower()
     assert draft.pages[0].text == "p1"  # unchanged
+
+
+def test_restore_page_unhides_and_resets_to_original(tmp_path):
+    from PIL import Image
+    from src.agent_tools import restore_page_tool
+    from src.draft import Draft, DraftPage
+
+    images = tmp_path / ".book-gen" / "images"
+    images.mkdir(parents=True)
+    original_png = images / "page-01.png"
+    Image.new("RGB", (40, 40), (10, 20, 30)).save(original_png)
+
+    draft = Draft(
+        source_pdf=tmp_path / ".book-gen" / "input" / "draft.pdf",
+        pages=[DraftPage(text="edited", image=None, layout="text-only", hidden=True)],
+    )
+    tool = restore_page_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    result = tool.handler({"page": 1})
+
+    assert draft.pages[0].hidden is False
+    assert draft.pages[0].image == original_png
+    assert "restored" in result.lower()
+
+
+def test_restore_page_handles_missing_original_image(tmp_path):
+    from src.agent_tools import restore_page_tool
+    from src.draft import Draft, DraftPage
+
+    draft = Draft(
+        source_pdf=tmp_path / "draft.pdf",
+        pages=[DraftPage(text="p1", hidden=True)],
+    )
+    tool = restore_page_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    result = tool.handler({"page": 1})
+
+    assert draft.pages[0].hidden is False
+    assert draft.pages[0].image is None
+    assert "no original image" in result.lower() or "unhidden" in result.lower()
+
+
+def test_restore_page_rejects_out_of_range(tmp_path):
+    from src.agent_tools import restore_page_tool
+    from src.draft import Draft, DraftPage
+
+    draft = Draft(
+        source_pdf=tmp_path / "draft.pdf",
+        pages=[DraftPage(text="p1")],
+    )
+    tool = restore_page_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    result = tool.handler({"page": 5})
+
+    assert "out of range" in result.lower()

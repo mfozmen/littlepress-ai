@@ -437,6 +437,65 @@ def apply_text_correction_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     )
 
 
+def restore_page_tool(
+    get_draft: Callable[[], Draft | None],
+    get_session_root: Callable[[], Path],
+) -> Tool:
+    """Tool: undo edits on a page by re-attaching ``pdf_ingest``'s
+    original output and clearing the ``hidden`` flag.
+
+    Concrete realisation of the input-preserved guarantee:
+    ``.book-gen/images/page-NN.png`` is never deleted, so the child's
+    original drawing is always available to re-attach. Called when the
+    user says 'page N restore' during the review turn. For a text
+    reset, call ``apply_text_correction`` with the original string.
+    """
+
+    def handler(input_: dict) -> str:
+        draft = get_draft()
+        if draft is None:
+            return _MSG_NO_DRAFT
+        page_n = int(input_["page"])
+        if page_n < 1 or page_n > len(draft.pages):
+            return (
+                f"Page {page_n} is out of range — the draft has "
+                f"{len(draft.pages)} pages."
+            )
+        page = draft.pages[page_n - 1]
+        page.hidden = False
+        original = (
+            Path(get_session_root())
+            / ".book-gen"
+            / "images"
+            / f"page-{page_n:02d}.png"
+        )
+        if original.is_file():
+            page.image = original
+            return f"Page {page_n} restored (image re-attached, unhidden)."
+        return (
+            f"Page {page_n} unhidden (no original image found at "
+            f"{original.name})."
+        )
+
+    return Tool(
+        name="restore_page",
+        description=(
+            "Undo edits on page N: clear the hidden flag and re-attach "
+            "the child's original drawing from pdf_ingest's per-page "
+            "output (``.book-gen/images/page-NN.png``). Use during the "
+            "post-render review turn when the user says 'page N "
+            "restore'. For a text reset, call apply_text_correction "
+            "with the original string instead."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"page": {"type": "integer", "minimum": 1}},
+            "required": ["page"],
+        },
+        handler=handler,
+    )
+
+
 def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     """Tool: pick a page's drawing as the cover image and, optionally,
     the cover style template.
