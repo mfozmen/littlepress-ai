@@ -22,16 +22,18 @@ from src import memory as memory_mod
 from src import session as session_mod
 from src.agent import Agent
 from src.agent_tools import (
+    apply_text_correction_tool,
     choose_layout_tool,
     generate_cover_illustration_tool,
     generate_page_illustration_tool,
+    hide_page_tool,
     propose_layouts_tool,
     propose_typo_fix_tool,
     read_draft_tool,
     render_book_tool,
+    restore_page_tool,
     set_cover_tool,
     set_metadata_tool,
-    hide_page_tool,
     transcribe_page_tool,
 )
 from src.draft import Draft
@@ -332,6 +334,10 @@ class Repl:
                 get_draft=get_draft, get_session_root=get_session_root
             ),
             hide_page_tool(get_draft=get_draft),
+            apply_text_correction_tool(get_draft=get_draft),
+            restore_page_tool(
+                get_draft=get_draft, get_session_root=get_session_root
+            ),
         ]
         # Vision-OCR tool lights up on every real provider now that
         # the message translators forward image content blocks
