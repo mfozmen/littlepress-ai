@@ -22,16 +22,18 @@ from src import memory as memory_mod
 from src import session as session_mod
 from src.agent import Agent
 from src.agent_tools import (
+    apply_text_correction_tool,
     choose_layout_tool,
     generate_cover_illustration_tool,
     generate_page_illustration_tool,
+    hide_page_tool,
     propose_layouts_tool,
     propose_typo_fix_tool,
     read_draft_tool,
     render_book_tool,
+    restore_page_tool,
     set_cover_tool,
     set_metadata_tool,
-    skip_page_tool,
     transcribe_page_tool,
 )
 from src.draft import Draft
@@ -104,56 +106,79 @@ def _looks_like_pdf_path(line: str) -> bool:
 
 
 _AGENT_GREETING_HINT = (
-    "The user just gave you a PDF draft. Call read_draft to see what's in "
-    "it, greet them in the same language they will use (they haven't "
-    "spoken yet — default to English but switch once you see their reply; "
-    "keep slash commands like /model /render /load literal — they are "
-    "REPL tokens, do NOT translate them), and briefly describe what you "
-    "see (page count, how many drawings, whether the title and author "
-    "are set). Ask the single most important thing you need to decide "
-    "next — do NOT ask a long list of questions up front.\n\n"
-    "ALWAYS ask the user whether this book is part of a series — every "
-    "book, regardless of what the title looks like (don't try to infer "
-    "'yes' from seeing '- 1' or 'Book 2' in the title; the user is the "
-    "source of truth). If the answer is yes, follow up with the volume "
-    "number ('which book in the series is this?'). Have the user record "
-    "that in the title when they set it (e.g. ``Yavru Dinozor - 1``) so "
-    "the cover renderer picks it up naturally.\n\n"
-    "When the conversation reaches the cover step, ALWAYS offer the user "
-    "all three options explicitly — don't silently default to picking a "
-    "page drawing:\n"
-    "  (a) reuse one of the page drawings as the cover (call set_cover "
-    "with the page number, and consult the select-cover-template skill "
-    "to pick the right template — full-bleed / framed / portrait-frame / "
-    "title-band-top depending on the drawing), or\n"
-    "  (b) generate an AI cover illustration (call "
-    "generate_cover_illustration — registered only on OpenAI; if the "
-    "user is on another provider tell them to switch via /model, and "
-    "warn them they'll be prompted for an OpenAI API key on first "
-    "switch if one isn't already stored in the OS keychain). "
-    "PRESERVE-CHILD-VOICE still applies on this path: describe the "
-    "cover scene in your OWN words from the story's themes — do NOT "
-    "quote or paraphrase the child's page text into the image prompt, "
-    "or\n"
-    "  (c) poster (type-only cover with no drawing — set_cover with "
-    "style='poster').\n\n"
-    "Ask the user for a short back-cover blurb (one or two sentences "
-    "about what the book is about — set_metadata with "
-    "field='back_cover_text'). PRESERVE-CHILD-VOICE: the back cover "
-    "is child-authored. Record the user's exact words verbatim — do "
-    "NOT invent, paraphrase, or 'improve' the blurb yourself. If the "
-    "user explicitly says they don't want a back cover, leave the "
-    "field empty.\n\n"
-    "Once title, author, cover, layouts, and back-cover text are all "
-    "set, SUMMARISE the metadata back to the user (title / author / "
-    "cover style / back-cover text) and ask them to approve or correct "
-    "any of it BEFORE rendering. Quote title, author, and back-cover "
-    "text VERBATIM from what the user stored — do NOT translate or "
-    "paraphrase them during the summary even if you've switched "
-    "languages. Call read_draft again if you need to re-check the "
-    "state. Do NOT jump straight from the last layout to render_book — "
-    "the review step is the user's last chance to catch a typo before "
-    "it lands in the printed PDF."
+    "The user just gave you a PDF draft. Call read_draft to see "
+    "what's in it, greet them in the same language they will use "
+    "(they haven't spoken yet — default to English but switch once "
+    "you see their reply; keep slash commands like /model /render "
+    "/load literal — they are REPL tokens, do NOT translate them). "
+    "\n\n"
+    "PROCESS THE DRAFT AUTOMATICALLY. Do NOT ask the user per-page "
+    "confirmations — those days are over. Run the ingestion pipeline "
+    "end-to-end without stopping to confirm each mutation:\n"
+    "  - For every image-only page, call transcribe_page — the tool "
+    "classifies the image itself via <BLANK>/<TEXT>/<MIXED> sentinels "
+    "and handles image/text decisions automatically.\n"
+    "  - Apply obvious typo/OCR-misread fixes via propose_typo_fix "
+    "on your own judgement; the tool is bounded (3 words / 30 "
+    "chars) so you can't rewrite a sentence.\n"
+    "  - Pick per-page layouts via propose_layouts (batch) using "
+    "the select-page-layout skill's rules.\n"
+    "  - Do NOT ask the user to approve any of this — the tools no "
+    "longer take a confirm callback; they auto-apply.\n\n"
+    "ASK ONLY FOR THINGS YOU CANNOT INFER. Before the first render, "
+    "collect from the user only:\n"
+    "  - title (and author) — required, the child is the source of "
+    "truth;\n"
+    "  - cover choice — offer the three options explicitly: (a) "
+    "reuse a page drawing (consult the select-cover-template skill), "
+    "(b) generate an AI cover illustration via "
+    "generate_cover_illustration (OpenAI-only; if the user is on "
+    "another provider tell them to switch via /model, and warn them "
+    "they'll be prompted for an OpenAI API key on first switch if "
+    "one isn't already stored in the OS keychain; a tiny cost confirm "
+    "stays on this tool — that's the only surviving gate and it is "
+    "about money, not content), or (c) poster style via set_cover "
+    "with style='poster'. PRESERVE-CHILD-VOICE still applies on "
+    "option (b): describe the cover scene in your OWN words from "
+    "the story's themes — do NOT quote or paraphrase the child's "
+    "page text into the image prompt;\n"
+    "  - back-cover blurb — one short line, verbatim from the user; "
+    "'skip' is allowed. Do NOT invent, paraphrase, or 'improve' it "
+    "yourself — PRESERVE-CHILD-VOICE: the back cover is "
+    "child-authored.\n"
+    "Ask each of these as its own one-line question — do not "
+    "bundle them into a list the user has to read and parse.\n\n"
+    "RENDER IMMEDIATELY after the above. Call render_book; the PDF "
+    "opens in the user's viewer automatically.\n\n"
+    "POST-RENDER REVIEW TURN. Post exactly one prompt to the user "
+    "after a successful render:\n"
+    "  'PDF ready. Which page numbers have issues? "
+    "(e.g. 3, 5 — or type none / ok / ship / done to finish.)'\n"
+    "Parse the user's reply. If they list page numbers with "
+    "corrections in free-form text, dispatch one or more tool calls:\n"
+    "  - 'page N text: <verbatim>' → apply_text_correction(N, <verbatim>). "
+    "The user's string is the source of truth; do NOT paraphrase, "
+    "translate, or fix anything in it.\n"
+    "  - 'page N restore' (or equivalent) → restore_page(N).\n"
+    "  - 'page N hide' → hide_page(N).\n"
+    "  - Cross-page asks ('regenerate the cover, less purple') → "
+    "call the appropriate tool; user confirms cost if any.\n"
+    "After applying all corrections, call render_book AGAIN and "
+    "ask the same review prompt. Loop until the user replies with "
+    "an intent that means 'nothing to fix / ship it' — accept "
+    "English tokens ``none``, ``ok``, ``ship``, ``done`` "
+    "case-insensitively, AND recognise the equivalent in whatever "
+    "language the user has been typing (they may reply in their "
+    "own language; trust the semantic match, don't force them to "
+    "use English). On exit, close with a single line pointing at "
+    "the stable PDF path.\n\n"
+    "PRESERVE-CHILD-VOICE. Even though tools don't confirm, the "
+    "child's words remain sacred: the OCR prompt still says "
+    "'verbatim, do not fix, do not polish'; apply_text_correction "
+    "writes the user's string as-is with no model in between; "
+    "input files under .book-gen/input/ and the per-page drawings "
+    "under .book-gen/images/page-NN.png are NEVER deleted or "
+    "rewritten by any tool."
 )
 
 
@@ -304,15 +329,19 @@ class Repl:
         get_session_root = lambda: self._session_root or Path.cwd()  # noqa: E731
         tools = [
             read_draft_tool(get_draft=get_draft),
-            propose_typo_fix_tool(get_draft=get_draft, confirm=self._confirm),
+            propose_typo_fix_tool(get_draft=get_draft),
             set_metadata_tool(get_draft=get_draft),
             set_cover_tool(get_draft=get_draft),
             choose_layout_tool(get_draft=get_draft),
-            propose_layouts_tool(get_draft=get_draft, confirm=self._confirm),
+            propose_layouts_tool(get_draft=get_draft),
             render_book_tool(
                 get_draft=get_draft, get_session_root=get_session_root
             ),
-            skip_page_tool(get_draft=get_draft, confirm=self._confirm),
+            hide_page_tool(get_draft=get_draft),
+            apply_text_correction_tool(get_draft=get_draft),
+            restore_page_tool(
+                get_draft=get_draft, get_session_root=get_session_root
+            ),
         ]
         # Vision-OCR tool lights up on every real provider now that
         # the message translators forward image content blocks
@@ -327,7 +356,6 @@ class Repl:
                 transcribe_page_tool(
                     get_draft=get_draft,
                     get_llm=lambda: self._llm,
-                    confirm=self._confirm,
                 )
             )
         # AI cover generation is OpenAI-only for now — don't advertise
@@ -355,9 +383,18 @@ class Repl:
         return Agent(llm=self._llm, tools=tools, console=self._console)
 
     def _confirm(self, prompt: str) -> bool:
-        """Ask the user y/n. Default: no on EOF or anything that isn't
-        clearly a yes — preserve-child-voice prefers silence over a
-        wrong 'apply this change'."""
+        """Ask the user y/n.
+
+        NOTE: this confirm is intentionally narrow — after the review-based-
+        gate refactor it gates ONLY cost-incurring AI illustration calls
+        (``generate_cover_illustration``, ``generate_page_illustration``).
+        Content mutations (OCR, typo fix, layout batch, page hide) run
+        without a user gate; the user audits the finished PDF in the
+        post-render review turn and edits via ``apply_text_correction`` /
+        ``restore_page`` / ``hide_page`` if anything's wrong.
+
+        Default: no on EOF or anything that isn't clearly a yes —
+        preserve-child-voice prefers silence over a speculative charge."""
         self._console.print(f"[yellow]{prompt}[/yellow] (y/n)")
         try:
             answer = self._read().strip().lower()

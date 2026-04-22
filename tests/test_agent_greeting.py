@@ -123,132 +123,116 @@ def test_greeting_still_asks_agent_to_read_draft_first():
     assert "read_draft" in lowered
 
 
-def test_greeting_always_asks_whether_the_book_is_a_series():
-    """P4 from the Yavru Dinozor second-run feedback — maintainer's
-    call: ask the series question on every book, not only when the
-    title parses as a pattern. "Yavru Dinozor - 1" is book 1 of an
-    ongoing series; Poyraz plans book 2, 3, … so the first run must
-    give the agent a chance to capture that.
-
-    The hint must instruct the agent to ask, every time, without
-    peeking at the title first."""
-    lowered = _AGENT_GREETING_HINT.lower()
-    assert "series" in lowered
-    # "Always" / "every" marker so an LLM doesn't infer "only when
-    # the title looks like it's part of a series."
-    assert (
-        "always" in lowered
-        or "every book" in lowered
-        or "regardless" in lowered
-    )
-
-
-def test_greeting_asks_for_volume_number_when_series_answer_is_yes():
-    """The question has two parts: first "is this a series?" and
-    then, only if yes, "which volume?". Pin both branches so the
-    agent doesn't drop one half."""
-    lowered = _AGENT_GREETING_HINT.lower()
-    assert "volume" in lowered or "book number" in lowered or "which book" in lowered
-
-
-def test_greeting_includes_metadata_review_step_before_render():
-    """P5 from the Yavru Dinozor second-run feedback — the live run
-    went straight from the last metadata step into ``render_book``
-    without letting the user catch a typo in the title / author /
-    series / cover / blurb. Agent must summarise everything and
-    wait for approval *before* rendering. The summary step itself
-    comes after layouts (layout decisions are part of what the
-    user reviews)."""
-    lowered = _AGENT_GREETING_HINT.lower()
-    # Some wording that signals a review / confirm pass over the
-    # metadata as a whole.
-    assert "review" in lowered or "summarise" in lowered or "summarize" in lowered or "recap" in lowered
-    # And the explicit "wait for approval" beat so the agent doesn't
-    # only print a summary and barrel on.
-    assert (
-        "approve" in lowered
-        or "confirm" in lowered
-        or "let them correct" in lowered
-        or "ask them" in lowered
-    )
-
-
-def test_greeting_review_step_comes_before_render_and_after_layouts():
-    """PR #51 review #5 — the removed PLAN line, the test docstring,
-    and the greeting body all gave different orderings for the
-    review step. Pick one (after layouts, before render) and pin
-    it with a regex so a later rewrite can't silently reorder."""
-    hint = _AGENT_GREETING_HINT.lower()
-    # "summaris" (covers both -se and -ze spellings) must appear
-    # somewhere after the layouts word and before the render_book
-    # mention. A regex ordering check catches a rewrite that keeps
-    # the keywords but reorders them.
-    import re
-    match = re.search(r"layout.*summaris.*render", hint, re.DOTALL)
-    assert match is not None, (
-        "greeting must mention layouts → summarise → render in that "
-        "order. Current text:\n" + hint
-    )
-
-
-def test_greeting_summarise_step_demands_verbatim_read_back():
-    """PR #51 review #4 — "SUMMARISE the metadata" in a Turkish
-    session can drift into loose translation or paraphrase of the
-    title / author. Title and author are child-authored
-    (preserve-child-voice). The hint must tell the agent to quote
-    stored values verbatim, not rephrase them during the summary."""
-    lowered = _AGENT_GREETING_HINT.lower()
-    # Some verbatim / exact / quote-style wording near the
-    # summarise step.
-    assert (
-        "verbatim" in lowered
-        or "quote" in lowered
-        or "exactly as" in lowered
-        or "do not translate" in lowered
-        or "do not paraphrase" in lowered
-    )
-
-
-def test_greeting_asks_for_back_cover_blurb():
-    """P5 — the live run skipped back-cover text entirely; older
-    versions asked for it. Put the prompt back in the greeting so
-    the agent covers the full metadata scope (title / author /
-    series / cover / back cover)."""
-    lowered = _AGENT_GREETING_HINT.lower()
-    assert "back cover" in lowered or "back-cover" in lowered
-    # PR #51 review #6 — the old assertion accepted the lone word
-    # "short", which appears in any number of unrelated places.
-    # Require a multi-word phrase that locks the framing.
-    assert (
-        "short blurb" in lowered
-        or "brief blurb" in lowered
-        or "one or two sentence" in lowered
-        or "one-or-two sentence" in lowered
-    )
-
-
-def test_greeting_back_cover_bullet_carries_preserve_child_voice_guard():
-    """PR #51 review #1 (critical) — back-cover text is explicitly
-    child-authored per CLAUDE.md. The greeting's "in the child's
-    voice" can be misread by a primed LLM as permission to compose
-    a blurb *in the child's style* rather than to transcribe the
-    user's exact words. ``set_metadata`` has no confirm gate for
-    child-voice fields, so the greeting is the only enforcement
-    surface. Mirror the guard from option (b) of the cover step."""
+def test_greeting_echoes_preserve_child_voice_guard_for_back_cover():
+    """The back cover is child-authored (preserve-child-voice).
+    The greeting must forbid the agent from inventing / paraphrasing
+    the back-cover blurb."""
     lowered = _AGENT_GREETING_HINT.lower()
 
-    # The blurb bullet must explicitly forbid the agent from
-    # inventing / paraphrasing the text. We check for the bullet
-    # location first (back-cover mention) then the guard nearby.
     assert "back cover" in lowered or "back-cover" in lowered
 
-    # Same shape of phrasing the AI-cover guard uses.
+    # Guard against inventing or paraphrasing.
     assert (
         "do not invent" in lowered
         or "don't invent" in lowered
         or "do not paraphrase" in lowered
         or "don't paraphrase" in lowered
+        or "verbatim" in lowered
     )
     # And "preserve-child-voice" named so the link to CLAUDE.md is
     # unambiguous.
     assert "preserve-child-voice" in lowered
+
+
+# ---------------------------------------------------------------------------
+# Task 11 — new tests for the review-based flow
+# ---------------------------------------------------------------------------
+
+
+def test_greeting_drives_auto_ingest_then_review_turn():
+    from src.repl import _AGENT_GREETING_HINT
+
+    g = _AGENT_GREETING_HINT.lower()
+    # Auto-ingest signals.
+    assert "transcribe_page" in g
+    assert ("auto" in g) or ("without asking" in g) or ("do not ask" in g)
+    # Review turn.
+    assert "render" in g and ("issues" in g or "review" in g)
+    # Page-number-first ask.
+    assert "page number" in g or "which pages" in g or "page numbers" in g
+    # Exit tokens — at least 4 English tokens present (Turkish tokens
+    # were removed per PR #60 #4 to comply with CLAUDE.md English-only rule).
+    tokens = ("none", "ok", "ship", "done")
+    found = sum(1 for t in tokens if t in g)
+    assert found >= 4, (
+        f"expected at least 4 of {tokens} in greeting, found {found}"
+    )
+
+
+def test_greeting_no_longer_has_metadata_review_checkpoint():
+    """P5's 'summarise the metadata back before render_book' paragraph
+    is subsumed by the review turn."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    forbidden = [
+        "summarise the metadata",
+        "approve or correct any of it before rendering",
+    ]
+    for phrase in forbidden:
+        assert phrase.lower() not in _AGENT_GREETING_HINT.lower(), (
+            f"stale metadata-review-checkpoint phrase: {phrase!r}"
+        )
+
+
+def test_greeting_mentions_review_turn_tools_explicitly():
+    """The new flow depends on the agent knowing to use
+    apply_text_correction / restore_page / hide_page during review."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    g = _AGENT_GREETING_HINT
+    for tool in ("apply_text_correction", "restore_page", "hide_page"):
+        assert tool in g, f"review-turn tool {tool!r} missing from greeting"
+
+
+def test_greeting_no_longer_references_old_skip_page_tool():
+    from src.repl import _AGENT_GREETING_HINT
+
+    # Old name gone (the tool was renamed to hide_page).
+    assert "skip_page" not in _AGENT_GREETING_HINT
+
+
+def test_greeting_no_longer_references_keep_image_flag():
+    from src.repl import _AGENT_GREETING_HINT
+
+    assert "keep_image" not in _AGENT_GREETING_HINT
+
+
+# ---------------------------------------------------------------------------
+# PR #60 review-findings regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_greeting_does_not_contain_turkish_tokens():
+    """Regression for PR #60 #4: per CLAUDE.md, nothing Turkish in the
+    repo outside test fixtures. The greeting is an agent system prompt,
+    not a fixture. Exit-token recognition must be language-neutral
+    (agent infers intent), not a hard-coded Turkish literal."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    # Case-insensitive word-ish check.
+    lower = _AGENT_GREETING_HINT.lower()
+    forbidden_tr = (" yok", "yok ", "'yok'", '"yok"', "``yok``", "tamam")
+    for tok in forbidden_tr:
+        assert tok not in lower, f"Turkish token {tok!r} leaked into greeting"
+
+
+def test_greeting_instructs_language_neutral_exit_recognition():
+    """The greeting must tell the agent to recognise intent in
+    whatever language the user types, not match English tokens
+    verbatim. Regression for the fix to #4."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    g = _AGENT_GREETING_HINT.lower()
+    # The instruction names intent-recognition rather than a fixed
+    # multilingual token list.
+    assert "language" in g or "any language" in g or "intent" in g

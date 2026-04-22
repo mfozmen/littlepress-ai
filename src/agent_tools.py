@@ -5,52 +5,44 @@ that returns the currently-loaded Draft) and returns a ``Tool`` the agent
 can register. Keeping state out of the tool signature itself means tools
 stay testable without spinning up a full REPL.
 
-**Preserve-child-voice is enforced by gating every mutation of the
-child's content behind a user y/n confirm.** "The child's content"
-means page text, page image, and whole-page removal — the parts of
-the draft that came from the child's hand. Presentation choices
-(metadata, cover, single-page layout) can land directly because
-they're authoring decisions on top of the content, not the content
-itself.
+**Preserve-child-voice is enforced by two invariants**, not by per-call
+confirm gates:
 
-Content-gated tools (require a ``confirm: Callable[[str], bool]``):
+1. **The input is immutable.** Nothing in this module deletes, rewrites,
+   or renames the mirrored source PDF under ``.book-gen/input/`` or the
+   per-page drawings ``pdf_ingest`` extracts to
+   ``.book-gen/images/page-NN.*``. ``restore_page`` relies on them still
+   being on disk.
 
-- ``propose_typo_fix`` — narrow substring substitutions on ``page.text``,
-  bounded in length so the tool can't funnel a rewrite.
-- ``transcribe_page`` — OCR via the active LLM's vision; writes
-  ``page.text`` and, by default, clears ``page.image`` and switches
-  the layout to ``text-only``. A ``keep_image`` flag preserves a
-  separate drawing on mixed-content pages.
-- ``skip_page`` — removes a whole page from ``draft.pages`` and
-  renumbers the rest; the confirm explicitly warns when the dropped
-  page carries a drawing.
-- ``generate_cover_illustration`` — AI cover generation with a
-  pricing-aware confirm that shows the prompt and the quality-tier
-  cost estimate before any API call.
-- ``generate_page_illustration`` — AI page illustration; same
-  confirm shape as the cover tool. Pairs with ``transcribe_page``
-  to give a page a fresh drawing after the source image was cleared.
+2. **The child's words reach the printed page verbatim.** Every path
+   that writes ``page.text`` either goes through a verbatim-only prompt
+   (``transcribe_page`` asks the vision model for a byte-for-byte
+   transcription, three-sentinel classifier; ``propose_typo_fix`` is
+   bounded to 3 words / 30 chars per side so it can't funnel a rewrite)
+   or copies a user-supplied string with NO model in between
+   (``apply_text_correction``).
 
-Also user-gated (not strictly "content" but coordinated changes that
-warrant a single explicit approval):
+Per-mutation y/n confirm callbacks are gone. The tools that used to
+carry them auto-apply; the user audits the finished PDF in the
+post-render review turn and corrects any mistake via
+``apply_text_correction`` / ``restore_page`` / ``hide_page``.
 
-- ``propose_layouts`` — batch layout tool, one y/n for the whole
-  rhythm. Presentation-only but wholesale, so the user reviews the
-  full plan before it lands.
+Tool groups:
 
-Not gated — read-only or presentation-only, land directly:
-
-- ``read_draft`` — returns the current draft for the agent to see.
-- ``set_metadata`` — title, author, back-cover blurb,
-  cover subtitle.
-- ``set_cover`` — cover image choice and template style.
-- ``choose_layout`` — single-page layout change (presentation only).
-- ``render_book`` — builds the finished PDF. Pure disk side-effect;
-  never mutates the draft.
+- **Content tools, auto-apply (no confirm):** ``propose_typo_fix``,
+  ``transcribe_page``, ``propose_layouts``, ``hide_page``.
+- **Presentation / read-only (no confirm):** ``read_draft``,
+  ``set_metadata``, ``set_cover``, ``choose_layout``, ``render_book``.
+- **Cost-gated (single pricing confirm, not content):**
+  ``generate_cover_illustration``, ``generate_page_illustration``.
+- **Review-turn only (user-initiated, no confirm):**
+  ``apply_text_correction``, ``restore_page``. The agent must NOT
+  initiate these on its own — they only fire in response to a user
+  correction in the post-render review loop.
 
 If a future tool ships that mutates ``page.text``, ``page.image``, or
-removes a page without a ``confirm`` callback, that's a
-preserve-child-voice violation and belongs behind one.
+removes a page without going through either a verbatim-only prompt or a
+user-supplied string, that's a preserve-child-voice violation.
 """
 
 from __future__ import annotations
@@ -104,13 +96,30 @@ _CHILD_VOICE_FIELDS = {"cover_subtitle", "back_cover_text"}
 # "Typo" caps — anything beyond a short phrase is a story edit in disguise.
 _MAX_TYPO_CHARS = 30
 _MAX_TYPO_WORDS = 3
-# How many characters of surrounding page text to show in the y/n prompt
-# so the user sees what they're actually approving (not just a→b).
-_TYPO_CONTEXT_CHARS = 25
 
 # Message fragments surfaced back to the agent. Centralised so multiple
 # tools speak with one voice (and Sonar doesn't flag duplicated literals).
 _MSG_NO_DRAFT = "No draft loaded. Ask the user to provide a PDF first."
+_BOOK_GEN_DIR = ".book-gen"
+# Extensions pdf_ingest._extension_for may emit. Broader than just the
+# common PNG/JPG pair so a PDF embedding WebP/GIF/TIFF/BMP/JPEG2000
+# (rare but legal — PDF supports ``/JPXDecode`` for JPEG2000) still
+# round-trips through restore_page; narrow enough that an accidental
+# stray ``.txt`` / ``.json`` in ``.book-gen/images/`` is not attached
+# as a page image and later crashed by the renderer.
+_PIL_IMAGE_EXTS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".jpeg2000",
+        ".webp",
+        ".gif",
+        ".tiff",
+        ".tif",
+        ".bmp",
+    }
+)
 _MSG_UNSET = "(unset — ask the user)"
 
 
@@ -151,23 +160,6 @@ def _find_typo_match(text: str, before: str) -> re.Match[str] | None:
     """Word-boundary substring match so ``cat → dog`` never rewrites ``scatter``."""
     pattern = r"(?<!\w)" + re.escape(before) + r"(?!\w)"
     return re.search(pattern, text)
-
-
-def _build_typo_prompt(
-    text: str, match: re.Match[str], page_n: int, before: str, after: str, reason: str
-) -> str:
-    """Render the y/n prompt with ±_TYPO_CONTEXT_CHARS of surrounding
-    page text so the user sees what they're actually approving."""
-    start = max(0, match.start() - _TYPO_CONTEXT_CHARS)
-    end = min(len(text), match.end() + _TYPO_CONTEXT_CHARS)
-    context = text[start:end].replace("\n", " ")
-    prefix = "…" if start > 0 else ""
-    suffix = "…" if end < len(text) else ""
-    reason_tag = f" ({reason})" if reason else ""
-    return (
-        f"Page {page_n}: fix '{before}' → '{after}'{reason_tag} "
-        f"in: {prefix}{context}{suffix}"
-    )
 
 
 def read_draft_tool(get_draft: Callable[[], Draft | None]) -> Tool:
@@ -213,9 +205,10 @@ def read_draft_tool(get_draft: Callable[[], Draft | None]) -> Tool:
             "provider now); if the active model doesn't support vision, "
             "``transcribe_page`` surfaces a clean failure and the user "
             "can transcribe manually. When ``transcribe_page`` reports a "
-            "page looks blank (the ``<BLANK>`` sentinel branch), confirm "
-            "with the user and call ``skip_page`` to drop it from the "
-            "draft so it doesn't render as an empty spread. Never invent "
+            "page looks blank (the ``<BLANK>`` sentinel branch), the page "
+            "is auto-hidden (``hide_page``) so it doesn't render as an "
+            "empty spread — the user catches a wrongly-hidden page in the "
+            "post-render review turn via ``restore_page``. Never invent "
             "or paraphrase the child's words. Call this at the start of "
             "a session to see what you're working with."
         ),
@@ -253,10 +246,11 @@ def _read_draft_page_lines(draft: Draft) -> tuple[list[str], list[int]]:
         text = page.text.strip().replace("\n", " ")
         image_only = page.image is not None and not text
         tag = " [image-only]" if image_only else ""
+        hidden_tag = " [hidden]" if page.hidden else ""
         if image_only:
             image_only_pages.append(i)
         page_lines.append(
-            f"  Page {i} ({marker}, layout={page.layout}):{tag} {text}"
+            f"  Page {i} ({marker}, layout={page.layout}){hidden_tag}:{tag} {text}"
         )
     return page_lines, image_only_pages
 
@@ -273,22 +267,23 @@ def _build_image_only_note(image_only_pages: list[int]) -> str:
         "Use the ``transcribe_page`` tool to OCR each flagged "
         "page via the active LLM's vision capability (Claude 3+, "
         "GPT-4o, Gemini 1.5+), or ask the user to transcribe "
-        "manually. Always confirm the transcription with the "
-        "user before moving on. Do not invent, paraphrase, or "
+        "manually. The ``transcribe_page`` tool auto-applies the "
+        "OCR result; the user audits the rendered PDF later and "
+        "can correct specific pages via ``apply_text_correction`` "
+        "in the review turn. Do not invent, paraphrase, or "
         "'guess' the child's words — preserve-child-voice."
     )
 
 
 def propose_typo_fix_tool(
     get_draft: Callable[[], Draft | None],
-    confirm: Callable[[str], bool],
 ) -> Tool:
-    """Tool: offer a mechanical typo / OCR-misread fix on one page.
+    """Tool: apply a mechanical typo / OCR-misread fix on one page.
 
     Only a substring substitution is allowed — and the total edit is
     bounded to a short run of characters so the agent can't funnel a
-    sentence-level rewrite through this tool. The user must say yes
-    before anything is written to the draft.
+    sentence-level rewrite through this tool. Auto-applied without a y/n
+    gate; bad fixes are caught in the post-render review turn.
     """
 
     def handler(input_: dict) -> str:
@@ -314,20 +309,17 @@ def propose_typo_fix_tool(
                 "the child's text."
             )
 
-        prompt = _build_typo_prompt(page.text, match, page_n, before, after, reason)
-        if not confirm(prompt):
-            return f"User declined. Keep page {page_n} exactly as the child wrote it."
-
         page.text = page.text[: match.start()] + after + page.text[match.end():]
-        return f"Applied on page {page_n}. New text: {page.text!r}"
+        reason_tag = f" ({reason})" if reason else ""
+        return f"Applied on page {page_n}{reason_tag}. New text: {page.text!r}"
 
     return Tool(
         name="propose_typo_fix",
         description=(
-            "Propose a mechanical typo / OCR-misread fix on one page. Only "
-            "substring substitutions (≤30 chars each side) are allowed. The "
-            "user must confirm before the draft is changed. Do NOT use this "
-            "to rewrite sentences or 'polish' the child's voice."
+            "Apply a mechanical typo / OCR-misread fix on one page. Only "
+            "substring substitutions (≤30 chars each side) are allowed. "
+            "Do NOT use this to rewrite sentences or 'polish' the child's "
+            "voice."
         ),
         input_schema={
             "type": "object",
@@ -391,6 +383,148 @@ def set_metadata_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     )
 
 
+def apply_text_correction_tool(get_draft: Callable[[], Draft | None]) -> Tool:
+    """Tool: overwrite a page's text verbatim with a user-provided string.
+
+    Intended for the post-render review turn: when the user says
+    'page 3 text: <verbatim>', the agent calls this tool with the
+    exact string. No model, no prompt, no heuristics — the incoming
+    ``text`` is written straight into ``page.text``. The agent MUST
+    NOT initiate this tool on its own; it is a user-initiated
+    correction path.
+
+    Side effect: if the target page is currently ``hidden=True`` the
+    tool also clears the flag. A user issuing a correction on a
+    hidden page almost certainly means "bring this page back with
+    this text"; silently writing to ``page.text`` while the page is
+    filtered out of the render by ``to_book`` would be a misleading
+    no-op. The auto-unhide is named in the reply so the action is
+    visible.
+    """
+
+    def handler(input_: dict) -> str:
+        draft = get_draft()
+        if draft is None:
+            return _MSG_NO_DRAFT
+        page_n = int(input_["page"])
+        text = input_["text"]
+        if page_n < 1 or page_n > len(draft.pages):
+            return (
+                f"Page {page_n} is out of range — the draft has "
+                f"{len(draft.pages)} pages."
+            )
+        page = draft.pages[page_n - 1]
+        page.text = text
+        if page.hidden:
+            page.hidden = False
+            return (
+                f"Page {page_n} text updated (verbatim, {len(text)} chars) "
+                f"and unhidden — page is now visible in the rendered PDF."
+            )
+        return f"Page {page_n} text updated (verbatim, {len(text)} chars)."
+
+    return Tool(
+        name="apply_text_correction",
+        description=(
+            "Replace the text of page N with the user-provided string, "
+            "verbatim. Use this ONLY during the post-render review turn "
+            "when the user says 'page N text: ...'. Do not invent or "
+            "paraphrase — the ``text`` field is written into page.text "
+            "exactly as passed in. If page N was hidden, this tool also "
+            "unhides it (a correction on a hidden page implies the user "
+            "wants it visible); the reply names the auto-unhide "
+            "explicitly. Never call on your own initiative."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "minimum": 1},
+                "text": {"type": "string"},
+            },
+            "required": ["page", "text"],
+        },
+        handler=handler,
+    )
+
+
+def restore_page_tool(
+    get_draft: Callable[[], Draft | None],
+    get_session_root: Callable[[], Path],
+) -> Tool:
+    """Tool: undo edits on a page by re-attaching ``pdf_ingest``'s
+    original output and clearing the ``hidden`` flag.
+
+    Concrete realisation of the input-preserved guarantee:
+    ``.book-gen/images/page-NN.*`` (the extension depends on what
+    ``pdf_ingest._extension_for`` derived from the PDF's embedded
+    image — commonly ``.png`` or ``.jpg``; in principle any format
+    PIL reports) is never deleted, so the child's original drawing
+    is always available to re-attach. Called when the user says
+    'page N restore' during the review turn. For a text reset, call
+    ``apply_text_correction`` with the original string.
+    """
+
+    def handler(input_: dict) -> str:
+        draft = get_draft()
+        if draft is None:
+            return _MSG_NO_DRAFT
+        page_n = int(input_["page"])
+        if page_n < 1 or page_n > len(draft.pages):
+            return (
+                f"Page {page_n} is out of range — the draft has "
+                f"{len(draft.pages)} pages."
+            )
+        page = draft.pages[page_n - 1]
+        page.hidden = False
+        images_dir = Path(get_session_root()) / _BOOK_GEN_DIR / "images"
+        stem = f"page-{page_n:02d}"
+        # Accept any extension pdf_ingest may have written — PNG and
+        # JPEG are the common shapes, but ``_extension_for`` returns
+        # whatever PIL detected (WebP, GIF, TIFF, BMP, or JPEG2000
+        # from ``/JPXDecode`` streams on exotic PDFs). The allow-list
+        # here is the known PIL image formats: it's permissive enough
+        # for every format pdf_ingest can produce, but still rejects
+        # stray non-image files (e.g. an accidental ``page-01.txt``)
+        # that would break the renderer downstream.
+        candidates = sorted(
+            p
+            for p in images_dir.glob(f"{stem}.*")
+            if p.is_file() and p.suffix.lower() in _PIL_IMAGE_EXTS
+        )
+        # Prefer PNG if the same page has multiple extensions on disk
+        # (deterministic — png is lossless, so keep it when present).
+        original = next(
+            (p for p in candidates if p.suffix.lower() == ".png"),
+            candidates[0] if candidates else None,
+        )
+        if original is not None:
+            page.image = original
+            return f"Page {page_n} restored (image re-attached, unhidden)."
+        return (
+            f"Page {page_n} unhidden (no original image found at "
+            f"{images_dir / stem}.*)"
+        )
+
+    return Tool(
+        name="restore_page",
+        description=(
+            "Undo edits on page N: clear the hidden flag and re-attach "
+            "the child's original drawing from pdf_ingest's per-page "
+            "output (``.book-gen/images/page-NN.*`` — extension depends "
+            "on what the PDF embedded, usually ``.png`` or ``.jpg``). "
+            "Use during the post-render review turn when the user says "
+            "'page N restore'. For a text reset, call "
+            "apply_text_correction with the original string instead."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"page": {"type": "integer", "minimum": 1}},
+            "required": ["page"],
+        },
+        handler=handler,
+    )
+
+
 def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     """Tool: pick a page's drawing as the cover image and, optionally,
     the cover style template.
@@ -449,21 +583,16 @@ def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     )
 
 
-def skip_page_tool(
+def hide_page_tool(
     get_draft: Callable[[], Draft | None],
-    confirm: Callable[[str], bool],
 ) -> Tool:
-    """Tool: remove a page from ``draft.pages`` with user approval.
+    """Tool: mark a page as hidden so it doesn't appear in the rendered book.
 
-    Samsung Notes exports commonly trail two or three blank pages.
-    ``transcribe_page`` flags them (``<BLANK>`` sentinel), but they
-    stay in the draft and the renderer treats them as real pages —
-    the printed book ends up with blank spreads the child never
-    meant to include. This tool drops the named page from the draft
-    after a y/n confirmation, shifting subsequent pages down so
-    numbering stays contiguous (matches how the renderer counts
-    pages, so ``choose_layout`` references don't suddenly target
-    the wrong page).
+    Input is preserved in ``draft.pages`` — nothing is deleted. The
+    ``restore_page`` tool reverses this symmetrically. Use when a page
+    is confirmed empty (e.g. a trailing blank from a phone-scan export,
+    flagged by ``transcribe_page`` with the ``<BLANK>`` sentinel) and
+    shouldn't appear in the printed book.
     """
 
     def handler(input_: dict) -> str:
@@ -473,38 +602,22 @@ def skip_page_tool(
         page_n, error = _parse_skip_page_input(input_, draft)
         if error is not None:
             return error
-        prompt = _build_skip_page_prompt(page_n, draft)
-        if not confirm(prompt):
-            # Only reference paths that actually exist: keep as a
-            # blank page, or type text with ``set_metadata`` style
-            # prompts (handled by the agent in conversation, not a
-            # tool call). Do not invent ``move_content`` /
-            # "mark as back cover" — neither has a tool today.
-            return (
-                f"User declined. Page {page_n} stays in the draft. "
-                "Ask whether they want to keep it as an intentional "
-                "blank spread, or type text into it (then confirm the "
-                "text manually — there's no mutating tool for typing "
-                "fresh page text)."
-            )
-        draft.pages.pop(page_n - 1)
+        draft.pages[page_n - 1].hidden = True
         return (
-            f"Page {page_n} removed. Draft now has {len(draft.pages)} "
-            f"page(s). Subsequent pages renumbered."
+            f"Page {page_n} hidden. Draft still has {len(draft.pages)} "
+            f"page(s); hidden pages are excluded from render. "
+            f"Use restore_page to reverse."
         )
 
     return Tool(
-        name="skip_page",
+        name="hide_page",
         description=(
-            "Remove a page from the draft entirely. Use this when a "
+            "Mark page N as hidden so it doesn't render. Input is "
+            "preserved — ``restore_page`` reverses this. Use when a "
             "page is confirmed empty (e.g. a trailing blank from a "
             "phone-scan export, flagged by transcribe_page with the "
             "``<BLANK>`` sentinel) and shouldn't appear in the "
-            "printed book. Destructive — the confirm gate takes a "
-            "y/n before anything changes. Remaining pages renumber "
-            "so subsequent tool calls keep referencing pages the way "
-            "the user counts them (page 3 after skipping page 2 "
-            "becomes page 2)."
+            "printed book."
         ),
         input_schema={
             "type": "object",
@@ -543,57 +656,9 @@ def _parse_skip_page_input(input_: dict, draft: Draft) -> tuple[int | None, str 
     return page_n, None
 
 
-def _build_skip_page_prompt(page_n: int, draft: Draft) -> str:
-    """Compose the destructive-action confirm prompt. Each line has
-    a single job: the drawing warning names the destruction risk
-    explicitly when the page has an image; the preview surfaces
-    whatever text is there; the renumber line only appears when
-    there actually are pages to renumber."""
-    page = draft.pages[page_n - 1]
-    return (
-        f"Remove page {page_n} from the draft?\n"
-        f"{_skip_drawing_line(page.image)}\n"
-        f"  {_skip_preview_line(page.text)}\n"
-        f"{_skip_renumber_line(page_n, len(draft.pages))}"
-        "Approve the removal?"
-    )
-
-
-def _skip_preview_line(text: str) -> str:
-    preview = (text or "").strip()[:80].replace("\n", " ")
-    if not preview:
-        return "(empty — no extractable text)"
-    return f"text preview: {preview!r}"
-
-
-def _skip_drawing_line(image) -> str:
-    """Drawing warning is deliberately loud when the page has an
-    image — the status-flag version of this line was easy to
-    mis-read (PR #48 review #5)."""
-    if image is None:
-        return "  drawing: none"
-    return (
-        "  drawing: YES — the drawing on this page will also be "
-        "lost; removal is permanent (reload the PDF to restore the "
-        "image reference)"
-    )
-
-
-def _skip_renumber_line(page_n: int, total: int) -> str:
-    """No renumber claim when the target is the last page — naming
-    a page that doesn't exist reads as a bug."""
-    if page_n >= total:
-        return ""
-    return (
-        f"Remaining pages will renumber — page {page_n + 1} "
-        f"becomes page {page_n}.\n"
-    )
-
-
 def transcribe_page_tool(
     get_draft: Callable[[], Draft | None],
     get_llm: Callable[[], object],
-    confirm: Callable[[str], bool],
 ) -> Tool:
     """Tool: use the active LLM's vision capability to transcribe a
     page's image text verbatim into ``draft.pages[n-1].text``.
@@ -602,7 +667,7 @@ def transcribe_page_tool(
     scans) where the embedded text is pixels rather than ``/Font``
     glyphs and ``pypdf.extract_text`` legitimately returns empty.
 
-    Preserve-child-voice is enforced on three axes:
+    Preserve-child-voice is enforced on two axes:
 
     1. **Vision capability required.** Registered on every real
        provider (Anthropic / OpenAI / Google / Ollama), but the
@@ -614,39 +679,29 @@ def transcribe_page_tool(
        now forwards the image content block in its native wire
        format (OpenAI multi-modal content array, Gemini
        ``Part(inline_data=Blob(...))``, Ollama ``images`` list).
-    2. **User confirmation.** The OCR reply is shown to the user
-       *before* landing in ``page.text`` — same y/n pattern as
-       ``propose_typo_fix``. An existing transcription is surfaced
-       in the prompt so the user sees what's being overwritten.
-    3. **Verbatim prompt.** The vision prompt tells the model to
-       output the text exactly as written — no typo fixes, no
-       "polish," no paraphrase.
+    2. **Verbatim three-sentinel prompt.** The vision prompt tells
+       the model to classify the page and output the text exactly
+       as written — no typo fixes, no "polish," no paraphrase.
+       ``<TEXT>`` = pure text page (image cleared, layout →
+       text-only); ``<MIXED>`` = drawing + text (image kept);
+       ``<BLANK>`` = no text (page hidden).
     """
 
     def handler(input_: dict) -> str:
         draft = get_draft()
         if draft is None:
             return _MSG_NO_DRAFT
-        page_n, page, keep_image, error = _parse_transcribe_input(input_, draft)
+        page_n, page, error = _parse_transcribe_input(input_, draft)
         if error is not None:
             return error
         method = str(input_.get("method", "vision"))
         cleaned, error = _run_ocr_engine(method, input_, page, page_n, get_llm)
         if error is not None:
             return error
-        early = _interpret_reply(cleaned, page_n, method)
-        if early is not None:
-            return early
-        prompt_msg = _build_transcribe_confirm_prompt(
-            page_n, page.text, cleaned, keep_image=keep_image
-        )
-        if not confirm(prompt_msg):
-            return (
-                f"User declined the OCR transcription for page {page_n}. "
-                "Draft unchanged. Ask them to transcribe manually, or "
-                "call transcribe_page again after adjusting."
-            )
-        return _apply_transcription(page, cleaned, keep_image, page_n)
+        empty_msg = _check_empty_reply(cleaned, page_n, method)
+        if empty_msg is not None:
+            return empty_msg
+        return _apply_sentinel_result(page, cleaned, page_n, method)
 
     return Tool(
         name="transcribe_page",
@@ -656,24 +711,21 @@ def transcribe_page_tool(
             "the embedded text layer is empty but the image clearly "
             "shows words. Two OCR engines via ``method``: 'vision' "
             "(default) goes through the active LLM's vision "
-            "capability, 'tesseract' goes through a local pytesseract "
-            "install (zero API cost, works offline, strong on typeset "
+            "capability using a three-sentinel classifier; "
+            "'tesseract' goes through a local pytesseract install "
+            "(zero API cost, works offline, strong on typeset "
             "printed text like Turkish matbaa yazısı, noticeably "
             "weaker on handwriting). Prefer 'tesseract' for clean "
             "typed pages and pass ``lang='tur'`` (or 'eng', "
             "'tur+eng', etc., three-letter ISO-639-2/B codes). "
             "Preserve-child-voice: the vision prompt tells the model "
-            "to copy the text verbatim (no typo fixes, no "
-            "paraphrase); Tesseract is a classical OCR engine — it "
-            "will misread characters (diacritics, punctuation) but "
-            "won't rewrite or summarise, and the y/n confirm gate is "
-            "the real preserve-child-voice guard either way. The "
-            "user must approve the OCR reply before it lands in the "
-            "draft — same gate pattern as propose_typo_fix. SIDE "
-            "EFFECT: by default, approving also clears the page's "
-            "source image and switches the layout to ``text-only``. "
-            "Pass ``keep_image=true`` on mixed-content pages where "
-            "the image also carries a drawing you want to keep. "
+            "to copy the text verbatim (no typo fixes, no paraphrase) "
+            "and classify the page into one of three sentinels: "
+            "``<TEXT>`` (pure text — image is cleared, layout → "
+            "text-only to avoid the duplicate-print bug); "
+            "``<MIXED>`` (text + distinct drawing — text written, "
+            "image and layout kept so the child's drawing survives); "
+            "``<BLANK>`` (no text — page hidden). "
             "Vision-method registered on every real provider "
             "(Anthropic / OpenAI / Google / Ollama); a non-vision "
             "model surfaces as a failed chat call. Tesseract method "
@@ -686,22 +738,13 @@ def transcribe_page_tool(
             "type": "object",
             "properties": {
                 "page": {"type": "integer", "minimum": 1},
-                "keep_image": {
-                    "type": "boolean",
-                    "description": (
-                        "Pass true when the page's image carries a "
-                        "drawing the child wants to keep (mixed "
-                        "content). Default false — the image is "
-                        "cleared on OCR accept to avoid the "
-                        "duplicate-print bug."
-                    ),
-                },
                 "method": {
                     "type": "string",
                     "enum": ["vision", "tesseract"],
                     "description": (
                         "OCR engine. Default 'vision' — uses the "
-                        "active LLM's vision capability. 'tesseract' "
+                        "active LLM's vision capability with the "
+                        "three-sentinel classifier. 'tesseract' "
                         "routes through a local pytesseract install "
                         "(zero API cost, offline, strong on typeset "
                         "printed text; handwriting is shakier). "
@@ -728,38 +771,35 @@ def transcribe_page_tool(
 
 def _parse_transcribe_input(
     input_: dict, draft: Draft
-) -> tuple[int | None, object, bool, str | None]:
-    """Validate the 1-indexed page and the mixed-content flag. Returns
-    ``(page_n, page, keep_image, None)`` on success or ``(None, None,
-    False, error)`` when the input is unusable. ``keep_image`` lets
-    the agent signal "this image also carries a drawing — don't
-    auto-clear it on accept" (default False = Samsung-Notes case)."""
+) -> tuple[int | None, object, str | None]:
+    """Validate the 1-indexed page number. Returns ``(page_n, page,
+    None)`` on success or ``(None, None, error)`` when the input is
+    unusable."""
     raw = input_.get("page")
     if raw is None:
-        return None, None, False, (
+        return None, None, (
             "Rejected: 'page' is required — which page should be "
             "transcribed?"
         )
     try:
         page_n = int(raw)
     except (TypeError, ValueError):
-        return None, None, False, (
+        return None, None, (
             f"Rejected: 'page' must be an integer; got {raw!r}. "
             "Pass the 1-indexed page number."
         )
     if page_n < 1 or page_n > len(draft.pages):
-        return None, None, False, (
+        return None, None, (
             f"Page {page_n} is out of range — the draft has "
             f"{len(draft.pages)} pages."
         )
     page = draft.pages[page_n - 1]
     if page.image is None:
-        return None, None, False, (
+        return None, None, (
             f"Page {page_n} has no image to transcribe — nothing to "
             "OCR."
         )
-    keep_image = bool(input_.get("keep_image", False))
-    return page_n, page, keep_image, None
+    return page_n, page, None
 
 
 def _call_vision_for_transcription(
@@ -904,14 +944,12 @@ def _call_tesseract_for_transcription(
     return str(reply).strip(), None
 
 
-def _interpret_reply(cleaned: str, page_n: int, method: str) -> str | None:
-    """Early-return message for the two non-transcription replies:
-    an empty string (safety filter / OCR failure) and the
-    ``<BLANK>`` sentinel (truly blank page, vision-only). Returns
-    ``None`` when the reply is a real transcription the handler
-    should forward to the confirm gate. The empty-reply wording
-    branches on ``method`` — Tesseract failures are not safety
-    filters, and the retry advice is different."""
+def _check_empty_reply(cleaned: str, page_n: int, method: str) -> str | None:
+    """Early-return message when the OCR engine returns nothing at all
+    (empty string after stripping). Returns ``None`` when the reply
+    has content and should be forwarded to the sentinel parser.
+    The empty-reply wording branches on ``method`` — Tesseract
+    failures are not safety filters, and the retry advice differs."""
     if not cleaned:
         if method == "tesseract":
             return (
@@ -928,40 +966,92 @@ def _interpret_reply(cleaned: str, page_n: int, method: str) -> str | None:
             "vision-unsupported model). Draft left unchanged; "
             "ask the user to transcribe manually."
         )
-    if _is_blank_sentinel_reply(cleaned):
-        return (
-            f"Page {page_n} looks blank to the vision model "
-            "(no transcribable text on the image). Draft left "
-            "unchanged — ask the user whether this page was meant "
-            "to be empty (e.g. a trailing blank from the export) "
-            "or whether they want to skip it / mark it as the "
-            "back cover."
-        )
     return None
 
 
-def _apply_transcription(
-    page, cleaned: str, keep_image: bool, page_n: int
-) -> str:
-    """Write the approved transcription into the draft. The default
-    Samsung-Notes path also clears ``page.image`` + switches to
-    ``text-only`` layout; the ``keep_image=True`` path leaves the
-    image alone so a drawing on a mixed-content page isn't
-    destroyed."""
-    page.text = cleaned
-    preview = cleaned[:80].replace("\n", " ")
-    if keep_image:
+def _extract_sentinel(reply: str) -> tuple[str, str]:
+    """Parse the model's reply into ``(sentinel, body)``.
+
+    The first *non-empty* line is normalised (whitespace + backtick/quote
+    stripped) and matched against the three known sentinels.  Leading blank
+    lines are skipped so a reply like ``"\\n<TEXT>\\nhello"`` is handled
+    identically to ``"<TEXT>\\nhello"``.  ``body`` is everything after the
+    first non-empty line in the original reply, stripped of surrounding
+    whitespace while preserving interior newlines (child's multi-line text).
+
+    Returns ``("", "")`` for empty / all-whitespace input.
+    Returns ``("", reply.strip())`` when no recognised sentinel is on the
+    first non-empty line (model misbehaved — caller uses fallback)."""
+    all_lines = reply.split("\n")
+    non_empty = [line for line in all_lines if line.strip()]
+    if not non_empty:
+        return ("", "")
+    raw_first = non_empty[0].strip().strip("`'\"").strip()
+    first_idx = all_lines.index(non_empty[0])
+    body = "\n".join(all_lines[first_idx + 1:]).strip()
+    if raw_first in (_BLANK_SENTINEL, _TEXT_SENTINEL, _MIXED_SENTINEL):
+        return raw_first, body
+    return "", reply.strip()
+
+
+def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
+    """Parse the OCR reply and apply the appropriate action based on
+    which sentinel the model used (or the fallback when it didn't).
+
+    Vision replies use three-sentinel classification.
+    Tesseract returns raw text — treated the same as ``<TEXT>``
+    (clear image, set text-only) since Tesseract doesn't produce
+    drawings alongside text."""
+    if method == "tesseract":
+        # Tesseract raw text: apply as TEXT sentinel behaviour.
+        page.text = reply
+        page.image = None
+        page.layout = "text-only"
+        preview = reply[:80].replace("\n", " ")
         return (
-            f"Page {page_n} transcribed and applied ({len(cleaned)} "
-            f"chars; source image kept — mixed-content page). "
+            f"Page {page_n} transcribed and applied ({len(reply)} "
+            f"chars; source image cleared, layout text-only). "
             f"Preview: {preview!r}."
         )
-    page.image = None
-    page.layout = "text-only"
+
+    sentinel, body = _extract_sentinel(reply)
+
+    if sentinel == _BLANK_SENTINEL:
+        page.hidden = True
+        return f"Page {page_n} is blank — marked hidden."
+
+    if sentinel == _TEXT_SENTINEL:
+        page.text = body
+        page.image = None
+        page.layout = "text-only"
+        preview = body[:80].replace("\n", " ")
+        return (
+            f"Page {page_n} transcribed as pure text ({len(body)} "
+            f"chars; source image cleared, layout text-only). "
+            f"Preview: {preview!r}."
+        )
+
+    if sentinel == _MIXED_SENTINEL:
+        page.text = body
+        preview = body[:80].replace("\n", " ")
+        return (
+            f"Page {page_n} transcribed, drawing preserved "
+            f"({len(body)} chars; image and layout unchanged). "
+            f"Preview: {preview!r}."
+        )
+
+    # No recognised sentinel — model misbehaved. Write the raw reply
+    # as page.text (best-effort) but DO NOT touch page.image or
+    # page.layout — a non-destructive fallback preserves the child's
+    # drawing until the user audits the render and corrects via
+    # apply_text_correction / restore_page in the review turn.
+    page.text = reply
+    preview = reply[:80].replace("\n", " ")
     return (
-        f"Page {page_n} transcribed and applied ({len(cleaned)} "
-        f"chars; source image cleared, layout switched to "
-        f"text-only). Preview: {preview!r}."
+        f"(warning: model didn't use a sentinel) page {page_n} "
+        f"text written ({len(reply)} chars); image and layout "
+        f"unchanged — user should review in rendered PDF. "
+        f"Preview: {preview!r}."
     )
 
 
@@ -973,23 +1063,37 @@ def _apply_transcription(
 _TRANSCRIBE_MAX_IMAGE_EDGE = 1568
 
 _TRANSCRIBE_PROMPT = (
-    "Transcribe the text visible in this image EXACTLY as written. A "
-    "child wrote or typed this; preserve every spelling mistake, line "
-    "break, punctuation choice, and capitalisation verbatim. Do NOT "
-    "fix, polish, or improve the wording in any way — "
-    "preserve-child-voice.\n\n"
-    "If the image has NO visible text (a truly blank page), reply "
-    "with exactly <BLANK> on its own — no quotes, no explanation, "
-    "nothing else. Otherwise output ONLY the transcribed text, "
-    "with no preamble, quotes, or commentary."
+    "Classify this image and transcribe any text it contains. "
+    "A child wrote or typed this; preserve every spelling mistake, "
+    "line break, punctuation choice, and capitalisation verbatim. "
+    "Do NOT fix, polish, translate, reorder, or improve the wording "
+    "in any way — preserve-child-voice. Do NOT describe or explain "
+    "any drawing.\n\n"
+    "You MUST reply with exactly ONE of these three sentinels on "
+    "the first line, then (when applicable) the verbatim "
+    "transcription on subsequent lines:\n\n"
+    "<BLANK>\n"
+    "  Use this sentinel alone when the page has no meaningful "
+    "content (truly blank).\n\n"
+    "<TEXT>\n"
+    "  Use this sentinel when the image is pure text (e.g. a "
+    "Samsung Notes screenshot or scanned typed page). Follow it "
+    "with the verbatim transcription.\n\n"
+    "<MIXED>\n"
+    "  Use this sentinel when the image contains a distinct drawing "
+    "alongside text. Follow it with the verbatim transcription of "
+    "the TEXT ONLY — do not describe or mention the drawing.\n\n"
+    "Reply format: sentinel on line 1, transcription on remaining "
+    "lines (or nothing after <BLANK>). No preamble, no quotes, no "
+    "commentary — only the sentinel line and the transcription."
 )
-# The sentinel the prompt asks for when the page carries no text.
+# Sentinels the three-sentinel vision prompt asks for.
 # Language-agnostic: the prompt applies equally to Turkish, English,
-# or any other script, and all compliant replies collapse to this
-# one token. A hedged real transcription ("I cannot make out the
-# last line, but the rest reads: '…'") never collides with this
-# check, so it reaches the confirm gate intact.
+# or any other script, and all compliant replies collapse to one of
+# these three tokens.
 _BLANK_SENTINEL = "<BLANK>"
+_TEXT_SENTINEL = "<TEXT>"
+_MIXED_SENTINEL = "<MIXED>"
 
 
 def _build_image_block(image_path: Path) -> dict:
@@ -1033,62 +1137,6 @@ def _build_image_block(image_path: Path) -> dict:
         },
     }
 
-
-def _is_blank_sentinel_reply(reply: str) -> bool:
-    """Return True when the LLM's reply is the ``<BLANK>`` sentinel
-    (possibly wrapped in whitespace, quotes, or backticks) that the
-    prompt asks for on empty pages.
-
-    Exact comparison after stripping wrapping, so a story that
-    happens to contain ``<BLANK>`` as a substring inside a longer
-    sentence still transcribes through to the confirm gate. The
-    confirm gate remains the last line of defence for prose-style
-    meta-responses the model emits when it ignores the sentinel
-    instruction."""
-    core = reply.strip().strip("`'\"").strip()
-    return core == _BLANK_SENTINEL
-
-
-def _build_transcribe_confirm_prompt(
-    page_n: int, existing_text: str, new_text: str, *, keep_image: bool
-) -> str:
-    """Compose the y/n prompt shown to the user. The footer names the
-    exact consequences of approval — either we're keeping the image
-    (mixed-content page) or we're clearing it (default, Samsung-Notes
-    case). The drawing-destruction warning on the default path is
-    deliberately explicit: the child's drawing on this page will
-    ALSO be lost."""
-    if keep_image:
-        footer = (
-            "Approving writes the OCR text into the page. The source "
-            "image (and any drawing on this page) stays in place — "
-            "this is the ``keep_image=True`` branch, use it only when "
-            "the page image carries a drawing the child wants to keep."
-        )
-    else:
-        footer = (
-            "Approving also removes the source image on this page and "
-            "switches its layout to text-only. Any drawing on this "
-            "page will also be lost — the image is cleared from the "
-            "draft. Use this default branch only when the page image "
-            "is a text screenshot (Samsung Notes / phone-scan export). "
-            "For pages with a separate drawing you want to keep, call "
-            "this tool with ``keep_image=true`` instead."
-        )
-    if existing_text.strip():
-        return (
-            f"Replace the existing text on page {page_n}?\n"
-            f"  Existing (user-typed):\n    {existing_text!r}\n"
-            f"  New (OCR):\n    {new_text!r}\n"
-            f"{footer}\n"
-            "Approve the overwrite?"
-        )
-    return (
-        f"Apply this OCR transcription to page {page_n}?\n"
-        f"  {new_text!r}\n"
-        f"{footer}\n"
-        "Approve?"
-    )
 
 
 def _validate_cover_inputs(draft, style, page_n_raw) -> str | None:
@@ -1317,7 +1365,7 @@ def _hashed_image_output_path(
 
     token = f"{prompt}|{time.time_ns()}"
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
-    return session_root / ".book-gen" / "images" / f"{prefix}-{digest}.png"
+    return session_root / _BOOK_GEN_DIR / "images" / f"{prefix}-{digest}.png"
 
 
 def generate_page_illustration_tool(
@@ -1701,17 +1749,18 @@ def _impose_and_mirror(
 
 def propose_layouts_tool(
     get_draft: Callable[[], Draft | None],
-    confirm: Callable[[str], bool],
 ) -> Tool:
-    """Tool: propose layouts for *every* page at once, show a table,
-    apply all if the user approves.
+    """Tool: propose layouts for *every* page at once and auto-apply.
 
     The earlier per-page ``choose_layout`` tool produces good results
     but is awkward for the "settle on a rhythm" phase of the
     conversation — the agent has to ask the user to approve N tiny
-    decisions. This tool batches them: one prompt, one yes/no, one
-    application. For surgical tweaks afterwards the per-page tool is
-    still the right call.
+    decisions. This tool batches them: one call, immediate application.
+    For surgical tweaks afterwards the per-page tool is still the right
+    call.
+
+    Layouts are auto-applied without a y/n gate; the user catches any
+    bad layout in the post-render review turn instead.
     """
 
     def handler(input_: dict) -> str:
@@ -1727,18 +1776,11 @@ def propose_layouts_tool(
                 "a partial change."
             )
         # Validate every proposed layout first. Partial application
-        # would leave the user with a mix they didn't approve.
+        # would leave the user with a mix they didn't want.
         rejection = _reject_layout_batch(draft, items)
         if rejection is not None:
             return rejection
 
-        prompt = _build_layout_prompt(items)
-        if not confirm(prompt):
-            return (
-                "User declined the proposed rhythm. Ask what they'd "
-                "like to change, then propose again or adjust specific "
-                "pages with choose_layout."
-            )
         for item in items:
             draft.pages[int(item["page"]) - 1].layout = str(item["layout"])
         return f"Applied layouts to all {len(items)} pages."
@@ -1811,19 +1853,6 @@ def _reject_layout_batch(draft: Draft, items: list[dict]) -> str | None:
     return None
 
 
-def _build_layout_prompt(items: list[dict]) -> str:
-    """Render a table-ish summary of the proposed rhythm for the y/n
-    prompt — the user sees every page and the reason for the choice."""
-    rows = ["Proposed layouts:"]
-    for item in sorted(items, key=lambda d: int(d["page"])):
-        page_n = int(item["page"])
-        layout = str(item["layout"])
-        reason = str(item.get("reason", ""))
-        rows.append(f"  Page {page_n}: {layout} — {reason}")
-    rows.append("Approve this rhythm?")
-    return "\n".join(rows)
-
-
 def render_book_tool(
     get_draft: Callable[[], Draft | None],
     get_session_root: Callable[[], Path],
@@ -1859,7 +1888,7 @@ def render_book_tool(
             )
 
         impose = bool(input_.get("impose", False))
-        source_dir = Path(get_session_root()) / ".book-gen"
+        source_dir = Path(get_session_root()) / _BOOK_GEN_DIR
         output_dir = source_dir / "output"
         slug = slugify(draft.title)
         # next_version_number needs the directory to exist so it can

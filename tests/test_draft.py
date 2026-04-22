@@ -334,3 +334,35 @@ def test_next_version_does_not_confuse_slugs_ending_with_version_digits(tmp_path
 
     # Unrelated slug; should start at v1.
     assert next_version_number(tmp_path, "book") == 1
+
+
+def test_draft_page_defaults_to_visible():
+    from src.draft import DraftPage
+
+    page = DraftPage(text="hi")
+
+    assert page.hidden is False
+
+
+def test_draft_page_can_be_hidden():
+    from src.draft import DraftPage
+
+    page = DraftPage(text="hi", hidden=True)
+
+    assert page.hidden is True
+
+
+def test_to_book_excludes_hidden_pages(tmp_path):
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Story",
+        pages=[
+            DraftPage(text="page 1"),
+            DraftPage(text="page 2", hidden=True),
+            DraftPage(text="page 3"),
+        ],
+    )
+
+    book = to_book(draft, tmp_path)
+
+    assert [p.text for p in book.pages] == ["page 1", "page 3"]
