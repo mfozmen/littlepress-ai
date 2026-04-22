@@ -22,11 +22,11 @@ Primary flow is `littlepress draft.pdf` → interactive agent → printable PDF.
 - `src/cli.py` — `littlepress` console entry point (also aliased as `littlepress-ai` matching the PyPI name). Pre-loads a PDF when given, restores memory if one matches.
 - `src/repl.py` — read loop, slash-command dispatch, provider picker, confirmation prompt. Owns the in-memory `Draft`.
 - `src/agent.py` — tool-use loop that drives the active LLM.
-- `src/agent_tools.py` — tools registered with the agent: `read_draft`, `propose_typo_fix`, `set_metadata`, `set_cover`, `choose_layout`, `propose_layouts`, `render_book`, `transcribe_page` (every real provider; vision-capable model for `method="vision"`, or the opt-in Tesseract extra for `method="tesseract"`), `skip_page`, `generate_cover_illustration` (OpenAI-only), `generate_page_illustration` (OpenAI-only). **This is where preserve-child-voice is enforced** — every mutation of the child's content (page text, page image, whole-page removal) is gated behind a user y/n `confirm` callback: `propose_typo_fix`, `transcribe_page`, `skip_page`, `generate_cover_illustration`, `generate_page_illustration`, and the batch `propose_layouts` all route through it. Presentation-only tools (`set_metadata`, `set_cover`, single-page `choose_layout`, `render_book`, `read_draft`) land directly — they don't touch what the child wrote or drew. The module docstring has the full contract.
+- `src/agent_tools.py` — tools registered with the agent: `read_draft`, `propose_typo_fix` (auto-applies; bounded 3 words / 30 chars so it can't funnel a rewrite), `set_metadata`, `set_cover`, `choose_layout`, `propose_layouts` (auto-applies batch via `select-page-layout`), `render_book`, `transcribe_page` (every real provider; classifies each image via `<BLANK>` / `<TEXT>` / `<MIXED>` sentinels — no `keep_image` parameter), `hide_page` (sets `DraftPage.hidden=True`; non-destructive, `restore_page` reverses it), `generate_cover_illustration` (OpenAI-only; **cost confirm** — the only surviving y/n gate), `generate_page_illustration` (OpenAI-only; cost confirm), `apply_text_correction` (review-turn-only; writes user string verbatim), `restore_page` (review-turn; undo hide + re-attach `pdf_ingest` original drawing). **This is where preserve-child-voice is enforced** — content tools run without a user gate, but the prompts are verbatim-only and the input files under `.book-gen/input/` + `.book-gen/images/page-NN.*` are never touched. The module docstring has the full contract.
 - `src/providers/llm.py` — `LLMProvider` protocol + `NullProvider`, `AnthropicProvider`, `GoogleProvider`, `OpenAIProvider`, `OllamaProvider`. `chat()` for one-shot text, `turn()` for the tool-use loop.
 - `src/providers/image.py` — `ImageProvider` protocol + `OpenAIImageProvider` (model `gpt-image-1`) for the optional AI cover generation tool.
 - `src/providers/validator.py` — provider key-validation pings (Anthropic, Google, OpenAI auth pings; Ollama reachability ping).
-- `src/draft.py` — `Draft` / `DraftPage`: lenient in-memory working shape. `from_pdf` ingests; `to_book` projects to the strict `Book` the renderer wants. `slugify` is the single source of truth for output filenames, shared by the agent's `render_book` tool and the REPL's `/render`. `collect_input_pdf` mirrors the user's PDF into `.book-gen/input/` so memory survives file moves. `next_version_number` + `atomic_copy` support the versioned render flow.
+- `src/draft.py` — `Draft` / `DraftPage`: lenient in-memory working shape. `from_pdf` ingests; `to_book` projects to the strict `Book` the renderer wants. `slugify` is the single source of truth for output filenames, shared by the agent's `render_book` tool and the REPL's `/render`. `collect_input_pdf` mirrors the user's PDF into `.book-gen/input/` so memory survives file moves. `next_version_number` + `atomic_copy` support the versioned render flow. `DraftPage.hidden` flag hides a page from `to_book` without removing it from the draft — paired with the new `hide_page` / `restore_page` tools so undo is always possible.
 - `src/memory.py` — per-project persistence at `.book-gen/draft.json`. Atomic write, fsync, schema-versioned.
 - `src/session.py` — per-working-directory session state (active provider, etc.) at `.book-gen/session.json`.
 - `src/schema.py` — strict `Book` / `Page` / `Cover` / `BackCover` dataclasses + `load_book` (kept as a library API for reading a `book.json` off disk — useful for external tooling).
@@ -36,7 +36,7 @@ Primary flow is `littlepress draft.pdf` → interactive agent → printable PDF.
 - `src/builder.py` — ReportLab-based A5 PDF assembly.
 - `src/imposition.py` — 2-up saddle-stitch A4 booklet via `pypdf`.
 - `src/pdf_ingest.py` — text + image extraction from the input PDF.
-- `src/prune.py` — `.book-gen/` housekeeping. Drops orphan AI-generated images (`cover-<hex>.png` / `page-<hex>.png` patterns only, so the child's extracted drawings are never touched) and snapshot PDFs beyond the most-recent few. Called silently at the end of every versioned render (both `render_book` agent tool and REPL `/render`); exposed manually as `/prune`.
+- `src/prune.py` — `.book-gen/` housekeeping. Drops orphan AI-generated images (`cover-<hex>.png` / `page-<hex>.png` patterns only, so the child's extracted drawings are never touched) and snapshot PDFs beyond the most-recent few. Called silently at the end of every versioned render (both `render_book` agent tool and REPL `/render`); exposed manually as `/prune`. **Input-preserved guarantee:** `.book-gen/input/*` and `.book-gen/images/page-NN.*` are out of scope for prune by contract, not just by current regex coincidence — `restore_page` relies on these files still being present. `_AI_IMAGE_PATTERN` enforces the split.
 - `.book-gen/` — per-project runtime state (gitignored): `session.json`, `draft.json`, `input/`, `images/`, `output/`.
 
 ## Book schema
@@ -81,9 +81,15 @@ Planning lives in `docs/PLAN.md` — the single agent-first roadmap. When a PR s
 
 ## Core principle: the child is the author
 
-This project exists so a **child feels like a real author**. The child's original words are sacred. Claude's default instinct to "improve" prose is the single biggest risk to that goal and must be actively suppressed at every layer — prompts, code transforms, edit passes, OCR cleanup.
+This project exists so a **child feels like a real author**. Two invariants hold end-to-end:
 
-Before touching any text that originated from a child author (OCR output, `book.json` page text, cover/back-cover text), Claude MUST invoke the project-level **`preserve-child-voice`** skill (`.claude/skills/preserve-child-voice/`) and follow its allowed/forbidden-edit rules.
+1. **The input is immutable.** The child's scanned PDF mirror at `.book-gen/input/` and the per-page drawings `pdf_ingest` extracts to `.book-gen/images/page-NN.*` are **never** deleted, rewritten, or renamed by any tool. Anything on the output side can be regenerated from them.
+
+2. **The child's words reach the printed page verbatim.** Every write path goes through a verbatim-preserving prompt (OCR asks for a byte-for-byte transcription, no polishing) or a tool that copies a user-provided string without model processing (`apply_text_correction`). Claude's default instinct to "improve" prose is actively suppressed at prompt level.
+
+Per-mutation y/n confirm gates are NOT how this is enforced — those lived through the first year of the project and became the UX problem they were meant to prevent. The single remaining gate is a **cost** confirm on the two AI illustration tools (`generate_cover_illustration`, `generate_page_illustration`) because they spend money. Everything else auto-applies. The user audits the finished PDF in a post-render review turn; any mistake is reversible via `apply_text_correction` or `restore_page`.
+
+Before touching any text that originated from a child author (OCR output, `book.json` page text, cover/back-cover text), Claude MUST invoke the project-level **`preserve-child-voice`** skill (`.claude/skills/preserve-child-voice/`) and follow its rules.
 
 ## Skills used in this project
 

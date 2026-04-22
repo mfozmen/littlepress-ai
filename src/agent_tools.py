@@ -5,52 +5,44 @@ that returns the currently-loaded Draft) and returns a ``Tool`` the agent
 can register. Keeping state out of the tool signature itself means tools
 stay testable without spinning up a full REPL.
 
-**Preserve-child-voice is enforced by gating every mutation of the
-child's content behind a user y/n confirm.** "The child's content"
-means page text, page image, and whole-page removal — the parts of
-the draft that came from the child's hand. Presentation choices
-(metadata, cover, single-page layout) can land directly because
-they're authoring decisions on top of the content, not the content
-itself.
+**Preserve-child-voice is enforced by two invariants**, not by per-call
+confirm gates:
 
-Content-gated tools (require a ``confirm: Callable[[str], bool]``):
+1. **The input is immutable.** Nothing in this module deletes, rewrites,
+   or renames the mirrored source PDF under ``.book-gen/input/`` or the
+   per-page drawings ``pdf_ingest`` extracts to
+   ``.book-gen/images/page-NN.*``. ``restore_page`` relies on them still
+   being on disk.
 
-- ``propose_typo_fix`` — narrow substring substitutions on ``page.text``,
-  bounded in length so the tool can't funnel a rewrite.
-- ``transcribe_page`` — OCR via the active LLM's vision; writes
-  ``page.text`` and, by default, clears ``page.image`` and switches
-  the layout to ``text-only``. A ``keep_image`` flag preserves a
-  separate drawing on mixed-content pages.
-- ``skip_page`` — removes a whole page from ``draft.pages`` and
-  renumbers the rest; the confirm explicitly warns when the dropped
-  page carries a drawing.
-- ``generate_cover_illustration`` — AI cover generation with a
-  pricing-aware confirm that shows the prompt and the quality-tier
-  cost estimate before any API call.
-- ``generate_page_illustration`` — AI page illustration; same
-  confirm shape as the cover tool. Pairs with ``transcribe_page``
-  to give a page a fresh drawing after the source image was cleared.
+2. **The child's words reach the printed page verbatim.** Every path
+   that writes ``page.text`` either goes through a verbatim-only prompt
+   (``transcribe_page`` asks the vision model for a byte-for-byte
+   transcription, three-sentinel classifier; ``propose_typo_fix`` is
+   bounded to 3 words / 30 chars per side so it can't funnel a rewrite)
+   or copies a user-supplied string with NO model in between
+   (``apply_text_correction``).
 
-Also user-gated (not strictly "content" but coordinated changes that
-warrant a single explicit approval):
+Per-mutation y/n confirm callbacks are gone. The tools that used to
+carry them auto-apply; the user audits the finished PDF in the
+post-render review turn and corrects any mistake via
+``apply_text_correction`` / ``restore_page`` / ``hide_page``.
 
-- ``propose_layouts`` — batch layout tool, one y/n for the whole
-  rhythm. Presentation-only but wholesale, so the user reviews the
-  full plan before it lands.
+Tool groups:
 
-Not gated — read-only or presentation-only, land directly:
-
-- ``read_draft`` — returns the current draft for the agent to see.
-- ``set_metadata`` — title, author, back-cover blurb,
-  cover subtitle.
-- ``set_cover`` — cover image choice and template style.
-- ``choose_layout`` — single-page layout change (presentation only).
-- ``render_book`` — builds the finished PDF. Pure disk side-effect;
-  never mutates the draft.
+- **Content tools, auto-apply (no confirm):** ``propose_typo_fix``,
+  ``transcribe_page``, ``propose_layouts``, ``hide_page``.
+- **Presentation / read-only (no confirm):** ``read_draft``,
+  ``set_metadata``, ``set_cover``, ``choose_layout``, ``render_book``.
+- **Cost-gated (single pricing confirm, not content):**
+  ``generate_cover_illustration``, ``generate_page_illustration``.
+- **Review-turn only (user-initiated, no confirm):**
+  ``apply_text_correction``, ``restore_page``. The agent must NOT
+  initiate these on its own — they only fire in response to a user
+  correction in the post-render review loop.
 
 If a future tool ships that mutates ``page.text``, ``page.image``, or
-removes a page without a ``confirm`` callback, that's a
-preserve-child-voice violation and belongs behind one.
+removes a page without going through either a verbatim-only prompt or a
+user-supplied string, that's a preserve-child-voice violation.
 """
 
 from __future__ import annotations
