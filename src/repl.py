@@ -31,7 +31,7 @@ from src.agent_tools import (
     render_book_tool,
     set_cover_tool,
     set_metadata_tool,
-    skip_page_tool,
+    hide_page_tool,
     transcribe_page_tool,
 )
 from src.draft import Draft
@@ -312,7 +312,7 @@ class Repl:
             render_book_tool(
                 get_draft=get_draft, get_session_root=get_session_root
             ),
-            skip_page_tool(get_draft=get_draft, confirm=self._confirm),
+            hide_page_tool(get_draft=get_draft),
         ]
         # Vision-OCR tool lights up on every real provider now that
         # the message translators forward image content blocks

@@ -16,7 +16,7 @@ from src.agent_tools import (
     render_book_tool,
     set_cover_tool,
     set_metadata_tool,
-    skip_page_tool,
+    hide_page_tool,
     transcribe_page_tool,
 )
 from src.draft import Draft, DraftPage
@@ -2182,202 +2182,39 @@ def test_transcribe_page_no_sentinel_fallback_writes_text_as_text(tmp_path):
     assert "warning" in result.lower() or "sentinel" in result.lower()
 
 
-# --- skip_page ---------------------------------------------------------
+# --- hide_page (set hidden=True, no list pop) --------------------------------
 
 
-def test_skip_page_requires_draft(tmp_path):
-    tool = skip_page_tool(get_draft=lambda: None, confirm=lambda _p: True)
+def test_hide_page_requires_draft(tmp_path):
+    tool = hide_page_tool(get_draft=lambda: None)
 
     result = tool.handler({"page": 1})
 
     assert "no draft" in result.lower()
 
 
-def test_skip_page_rejects_out_of_range(tmp_path):
+def test_hide_page_rejects_out_of_range(tmp_path):
     draft = _image_only_draft(tmp_path)
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=lambda _p: True)
+    tool = hide_page_tool(get_draft=lambda: draft)
 
     result = tool.handler({"page": 99})
 
     assert "99" in result or "out of" in result.lower()
 
 
-def test_skip_page_asks_for_confirmation_with_page_context(tmp_path):
-    """Skipping a page is destructive — the confirm prompt must name
-    the page and surface any text already there so the user can see
-    what's being dropped. Blank pages (the common case after
-    ``transcribe_page`` hits ``<BLANK>``) show their empty state so
-    the user understands the removal is low-stakes."""
-    img = _tiny_png(tmp_path / "p.png")
-    draft = Draft(
-        source_pdf=tmp_path / "x.pdf",
-        title="Book",
-        author="A",
-        pages=[
-            DraftPage(text="page 1 text", image=Path("p1.png")),
-            DraftPage(text="", image=img),
-        ],
-    )
-    seen: list[str] = []
-
-    def _confirm(p):
-        seen.append(p)
-        return True
-
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=_confirm)
-
-    tool.handler({"page": 2})
-
-    assert seen, "confirm gate must run before removing the page"
-    assert "page 2" in seen[0].lower() or "page=2" in seen[0].lower()
-
-
-def test_skip_page_declined_leaves_draft_unchanged(tmp_path):
-    img = _tiny_png(tmp_path / "p.png")
-    draft = Draft(
-        source_pdf=tmp_path / "x.pdf",
-        title="Book",
-        author="A",
-        pages=[
-            DraftPage(text="one", image=Path("p1.png")),
-            DraftPage(text="two", image=img),
-            DraftPage(text="three", image=Path("p3.png")),
-        ],
-    )
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=lambda _p: False)
-
-    tool.handler({"page": 2})
-
-    assert len(draft.pages) == 3
-    assert [pg.text for pg in draft.pages] == ["one", "two", "three"]
-
-
-def test_skip_page_confirmed_removes_page_and_renumbers(tmp_path):
-    """On approval, the named page is dropped from ``draft.pages``.
-    Remaining pages shift down so page numbers stay contiguous: a
-    subsequent ``choose_layout({"page": 2, ...})`` targets what used
-    to be page 3, matching how the renderer numbers pages."""
-    img = _tiny_png(tmp_path / "p.png")
-    draft = Draft(
-        source_pdf=tmp_path / "x.pdf",
-        title="Book",
-        author="A",
-        pages=[
-            DraftPage(text="one", image=Path("p1.png")),
-            DraftPage(text="two", image=img),
-            DraftPage(text="three", image=Path("p3.png")),
-        ],
-    )
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=lambda _p: True)
-
-    result = tool.handler({"page": 2})
-
-    assert len(draft.pages) == 2
-    assert [pg.text for pg in draft.pages] == ["one", "three"]
-    # Reply confirms the change and names the new page count so the
-    # agent can update its mental model without a second read_draft.
-    assert "2" in result  # new page count or "page 2 removed"
-
-
-def test_skip_page_schema_requires_page(tmp_path):
-    tool = skip_page_tool(get_draft=lambda: None, confirm=lambda _p: True)
+def test_hide_page_schema_requires_page(tmp_path):
+    tool = hide_page_tool(get_draft=lambda: None)
 
     assert tool.input_schema["required"] == ["page"]
     assert "page" in tool.input_schema["properties"]
 
 
-def test_skip_page_confirm_warns_explicitly_when_page_has_drawing(tmp_path):
-    """PR #48 review #5 — ``drawing: yes`` is a status line, not a
-    warning. A user who thinks they're skipping a blank spread
-    could lose a real drawing. When the page has an image the
-    prompt must explicitly name the destruction."""
-    img = _tiny_png(tmp_path / "p.png")
-    draft = Draft(
-        source_pdf=tmp_path / "x.pdf",
-        title="Book",
-        author="A",
-        pages=[DraftPage(text="", image=img)],
-    )
-    seen: list[str] = []
-
-    def _confirm(p):
-        seen.append(p)
-        return False
-
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=_confirm)
-
-    tool.handler({"page": 1})
-
-    prompt = seen[0].lower()
-    # Some explicit destruction-warning wording; we don't pin exact
-    # copy so the message can evolve.
-    assert (
-        "permanent" in prompt
-        or "destroyed" in prompt
-        or "will be lost" in prompt
-        or "will also be removed" in prompt
-    )
-
-
-def test_skip_page_decline_suggestion_does_not_invent_tools(tmp_path):
-    """PR #48 review #6 — the decline path used to say "move content
-    here? mark as back cover?" but neither exists as a tool. A
-    literal-minded agent hallucinates tool calls. Suggestion must
-    only reference paths that actually exist."""
+def test_hide_page_handles_missing_or_bad_input_gracefully(tmp_path):
+    """Input guard mirrors the pattern established for other tools —
+    malformed input returns a tool-result string, not a ``KeyError`` /
+    ``ValueError`` across the tool boundary."""
     draft = _image_only_draft(tmp_path)
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=lambda _p: False)
-
-    result = tool.handler({"page": 1})
-
-    lowered = result.lower()
-    # Must not invent tools that don't exist.
-    assert "move_content" not in lowered
-    assert "mark as back cover" not in lowered
-    # But the decline message should still be helpful — some signal
-    # that the user can keep it or add text.
-    assert "keep" in lowered or "text" in lowered or "type" in lowered
-
-
-def test_skip_page_last_page_confirm_does_not_promise_renumber(tmp_path):
-    """PR #48 review #10 — when the target is the last page there's
-    nothing to renumber, so the old "page N+1 becomes page N" line
-    names a page that doesn't exist. Drop the specific renumber
-    claim when ``page_n == len(draft.pages)``."""
-    draft = Draft(
-        source_pdf=tmp_path / "x.pdf",
-        title="Book",
-        author="A",
-        pages=[
-            DraftPage(text="a", image=Path("1.png")),
-            DraftPage(text="b", image=Path("2.png")),
-        ],
-    )
-    seen: list[str] = []
-
-    def _confirm(p):
-        seen.append(p)
-        return False
-
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=_confirm)
-
-    tool.handler({"page": 2})  # last page
-
-    prompt = seen[0]
-    # The specific "page 3 becomes page 2" line must not be printed
-    # (page 3 doesn't exist here).
-    assert "page 3 becomes" not in prompt
-    assert "becomes page 2" not in prompt.replace("becomes page 1", "")
-
-
-def test_skip_page_handles_missing_or_bad_input_gracefully(tmp_path):
-    """PR #48 review #11 — other tools in this module guard input;
-    ``skip_page`` used raw ``int(input_["page"])`` which raises
-    ``KeyError`` or ``ValueError`` on a malformed call (weaker
-    model omits the key, or sends ``"2nd"``). Unhandled exceptions
-    cross the tool boundary and kill the agent turn. Return a
-    tool-result string instead so the agent can recover."""
-    draft = _image_only_draft(tmp_path)
-    tool = skip_page_tool(get_draft=lambda: draft, confirm=lambda _p: True)
+    tool = hide_page_tool(get_draft=lambda: draft)
 
     # Missing key.
     result_missing = tool.handler({})
@@ -2396,6 +2233,31 @@ def test_read_draft_description_names_the_skip_page_tool(tmp_path):
 
     desc = tool.description.lower()
     assert "skip_page" in desc
+
+
+def test_hide_page_does_not_take_confirm():
+    import inspect
+
+    from src.agent_tools import hide_page_tool
+
+    assert "confirm" not in inspect.signature(hide_page_tool).parameters
+
+
+def test_hide_page_flips_hidden_flag_without_removing(tmp_path):
+    from src.agent_tools import hide_page_tool
+
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="p1"), DraftPage(text="p2"), DraftPage(text="p3")],
+    )
+    tool = hide_page_tool(get_draft=lambda: draft)
+
+    tool.handler({"page": 2})
+
+    assert len(draft.pages) == 3
+    assert draft.pages[1].hidden is True
+    assert draft.pages[0].hidden is False
+    assert draft.pages[2].hidden is False
 
 
 def test_transcribe_page_description_mentions_image_side_effect(tmp_path):

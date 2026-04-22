@@ -549,21 +549,16 @@ def set_cover_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     )
 
 
-def skip_page_tool(
+def hide_page_tool(
     get_draft: Callable[[], Draft | None],
-    confirm: Callable[[str], bool],
 ) -> Tool:
-    """Tool: remove a page from ``draft.pages`` with user approval.
+    """Tool: mark a page as hidden so it doesn't appear in the rendered book.
 
-    Samsung Notes exports commonly trail two or three blank pages.
-    ``transcribe_page`` flags them (``<BLANK>`` sentinel), but they
-    stay in the draft and the renderer treats them as real pages —
-    the printed book ends up with blank spreads the child never
-    meant to include. This tool drops the named page from the draft
-    after a y/n confirmation, shifting subsequent pages down so
-    numbering stays contiguous (matches how the renderer counts
-    pages, so ``choose_layout`` references don't suddenly target
-    the wrong page).
+    Input is preserved in ``draft.pages`` — nothing is deleted. The
+    ``restore_page`` tool reverses this symmetrically. Use when a page
+    is confirmed empty (e.g. a trailing blank from a phone-scan export,
+    flagged by ``transcribe_page`` with the ``<BLANK>`` sentinel) and
+    shouldn't appear in the printed book.
     """
 
     def handler(input_: dict) -> str:
@@ -573,38 +568,22 @@ def skip_page_tool(
         page_n, error = _parse_skip_page_input(input_, draft)
         if error is not None:
             return error
-        prompt = _build_skip_page_prompt(page_n, draft)
-        if not confirm(prompt):
-            # Only reference paths that actually exist: keep as a
-            # blank page, or type text with ``set_metadata`` style
-            # prompts (handled by the agent in conversation, not a
-            # tool call). Do not invent ``move_content`` /
-            # "mark as back cover" — neither has a tool today.
-            return (
-                f"User declined. Page {page_n} stays in the draft. "
-                "Ask whether they want to keep it as an intentional "
-                "blank spread, or type text into it (then confirm the "
-                "text manually — there's no mutating tool for typing "
-                "fresh page text)."
-            )
-        draft.pages.pop(page_n - 1)
+        draft.pages[page_n - 1].hidden = True
         return (
-            f"Page {page_n} removed. Draft now has {len(draft.pages)} "
-            f"page(s). Subsequent pages renumbered."
+            f"Page {page_n} hidden. Draft still has {len(draft.pages)} "
+            f"page(s); hidden pages are excluded from render. "
+            f"Use restore_page to reverse."
         )
 
     return Tool(
-        name="skip_page",
+        name="hide_page",
         description=(
-            "Remove a page from the draft entirely. Use this when a "
+            "Mark page N as hidden so it doesn't render. Input is "
+            "preserved — ``restore_page`` reverses this. Use when a "
             "page is confirmed empty (e.g. a trailing blank from a "
             "phone-scan export, flagged by transcribe_page with the "
             "``<BLANK>`` sentinel) and shouldn't appear in the "
-            "printed book. Destructive — the confirm gate takes a "
-            "y/n before anything changes. Remaining pages renumber "
-            "so subsequent tool calls keep referencing pages the way "
-            "the user counts them (page 3 after skipping page 2 "
-            "becomes page 2)."
+            "printed book."
         ),
         input_schema={
             "type": "object",
