@@ -1006,15 +1006,23 @@ def _check_empty_reply(cleaned: str, page_n: int, method: str) -> str | None:
 def _extract_sentinel(reply: str) -> tuple[str, str]:
     """Parse the model's reply into ``(sentinel, body)``.
 
-    The first non-empty line is normalised (whitespace + backtick/quote
-    stripped) and matched against the three known sentinels. ``body``
-    is everything after the first newline, ``.strip()``-ed.
+    The first *non-empty* line is normalised (whitespace + backtick/quote
+    stripped) and matched against the three known sentinels.  Leading blank
+    lines are skipped so a reply like ``"\\n<TEXT>\\nhello"`` is handled
+    identically to ``"<TEXT>\\nhello"``.  ``body`` is everything after the
+    first non-empty line in the original reply, stripped of surrounding
+    whitespace while preserving interior newlines (child's multi-line text).
 
-    Returns ``("", body)`` when no recognised sentinel is on the first
-    line (model misbehaved — caller uses fallback behaviour)."""
-    lines = reply.split("\n", 1)
-    raw_first = lines[0].strip().strip("`'\"").strip()
-    body = lines[1].strip() if len(lines) > 1 else ""
+    Returns ``("", "")`` for empty / all-whitespace input.
+    Returns ``("", reply.strip())`` when no recognised sentinel is on the
+    first non-empty line (model misbehaved — caller uses fallback)."""
+    all_lines = reply.split("\n")
+    non_empty = [line for line in all_lines if line.strip()]
+    if not non_empty:
+        return ("", "")
+    raw_first = non_empty[0].strip().strip("`'\"").strip()
+    first_idx = all_lines.index(non_empty[0])
+    body = "\n".join(all_lines[first_idx + 1:]).strip()
     if raw_first in (_BLANK_SENTINEL, _TEXT_SENTINEL, _MIXED_SENTINEL):
         return raw_first, body
     return "", reply.strip()
@@ -1173,12 +1181,6 @@ def _is_sentinel_reply(reply: str, sentinel: str) -> bool:
     core = reply.strip().strip("`'\"").strip()
     return core == sentinel
 
-
-# Backward-compat alias kept for any code that referenced the old name.
-def _is_blank_sentinel_reply(reply: str) -> bool:
-    """Return True when the LLM's reply is the ``<BLANK>`` sentinel.
-    Delegates to the generalised ``_is_sentinel_reply`` helper."""
-    return _is_sentinel_reply(reply, _BLANK_SENTINEL)
 
 
 def _validate_cover_inputs(draft, style, page_n_raw) -> str | None:

@@ -3589,3 +3589,99 @@ def test_restore_page_rejects_out_of_range(tmp_path):
     result = tool.handler({"page": 5})
 
     assert "out of range" in result.lower()
+
+
+def test_extract_sentinel_skips_leading_blank_line_before_sentinel():
+    """``_extract_sentinel`` must skip to the first *non-empty* line.
+
+    A reply of ``"\\n<TEXT>\\nhello"`` has an empty first line; the
+    sentinel ``<TEXT>`` is on line 2. Without the fix ``lines[0]`` is
+    ``""`` which is not a known sentinel, so the function falls into
+    the ``("", reply.strip())`` fallback — making the caller write the
+    raw ``"<TEXT>\\nhello"`` string verbatim into ``page.text`` with a
+    warning prefix.  After the fix the sentinel is recognised and the
+    body is returned cleanly."""
+    from src.agent_tools import _extract_sentinel
+
+    sentinel, body = _extract_sentinel("\n<TEXT>\nBir gün bir yumurta çatlamış")
+    assert sentinel == "<TEXT>"
+    assert body == "Bir gün bir yumurta çatlamış"
+
+
+def test_extract_sentinel_skips_leading_blank_lines_for_blank_and_mixed():
+    """Same tolerance for ``<BLANK>`` (no body) and ``<MIXED>``."""
+    from src.agent_tools import _extract_sentinel
+
+    # Two leading blank lines before <BLANK>.
+    sentinel, body = _extract_sentinel("\n\n<BLANK>")
+    assert sentinel == "<BLANK>"
+    assert body == ""
+
+    # One leading blank line before <MIXED>.
+    sentinel, body = _extract_sentinel("\n<MIXED>\nKüçük dinozor")
+    assert sentinel == "<MIXED>"
+    assert body == "Küçük dinozor"
+
+
+def test_transcribe_page_tolerates_leading_blank_line_before_sentinel(tmp_path):
+    """Integration smoke: real vision models often pad the reply with a
+    blank line before the sentinel. The full tool must still apply the
+    correct sentinel path without a warning prefix."""
+
+    class _LeadingBlankLLM:
+        def chat(self, *_a, **_kw):
+            return "\n<TEXT>\nBir gün bir yumurta çatlamış"
+
+    img = _tiny_png(tmp_path / "p.png")
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="", image=img, layout="image-top")],
+    )
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft, get_llm=lambda: _LeadingBlankLLM()
+    )
+
+    result = tool.handler({"page": 1})
+
+    # Sentinel was recognised → text path applied cleanly.
+    assert draft.pages[0].text == "Bir gün bir yumurta çatlamış"
+    assert draft.pages[0].image is None
+    assert draft.pages[0].layout == "text-only"
+    # And no fallback warning prefix in the reply.
+    assert "warning" not in result.lower()
+
+
+def test_transcribe_page_tolerates_leading_blank_lines_for_blank_and_mixed(tmp_path):
+    """Integration smoke: same tolerance for <BLANK> and <MIXED>."""
+
+    class _BlankLLM:
+        def chat(self, *_a, **_kw):
+            return "\n\n<BLANK>"
+
+    class _MixedLLM:
+        def chat(self, *_a, **_kw):
+            return "\n<MIXED>\nKüçük dinozor"
+
+    img = _tiny_png(tmp_path / "p.png")
+
+    # <BLANK> with padding.
+    blank_draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="", image=img)],
+    )
+    transcribe_page_tool(
+        get_draft=lambda: blank_draft, get_llm=lambda: _BlankLLM()
+    ).handler({"page": 1})
+    assert blank_draft.pages[0].hidden is True
+
+    # <MIXED> with padding.
+    mixed_draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="", image=img, layout="image-top")],
+    )
+    transcribe_page_tool(
+        get_draft=lambda: mixed_draft, get_llm=lambda: _MixedLLM()
+    ).handler({"page": 1})
+    assert mixed_draft.pages[0].text == "Küçük dinozor"
+    assert mixed_draft.pages[0].image == img
+    assert mixed_draft.pages[0].layout == "image-top"
