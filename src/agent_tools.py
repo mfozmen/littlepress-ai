@@ -103,6 +103,7 @@ _TYPO_CONTEXT_CHARS = 25
 # Message fragments surfaced back to the agent. Centralised so multiple
 # tools speak with one voice (and Sonar doesn't flag duplicated literals).
 _MSG_NO_DRAFT = "No draft loaded. Ask the user to provide a PDF first."
+_BOOK_GEN_DIR = ".book-gen"
 _MSG_UNSET = "(unset — ask the user)"
 
 
@@ -306,7 +307,8 @@ def propose_typo_fix_tool(
             )
 
         page.text = page.text[: match.start()] + after + page.text[match.end():]
-        return f"Applied on page {page_n}. New text: {page.text!r}"
+        reason_tag = f" ({reason})" if reason else ""
+        return f"Applied on page {page_n}{reason_tag}. New text: {page.text!r}"
 
     return Tool(
         name="propose_typo_fix",
@@ -452,7 +454,7 @@ def restore_page_tool(
         page.hidden = False
         original = (
             Path(get_session_root())
-            / ".book-gen"
+            / _BOOK_GEN_DIR
             / "images"
             / f"page-{page_n:02d}.png"
         )
@@ -1380,7 +1382,7 @@ def _hashed_image_output_path(
 
     token = f"{prompt}|{time.time_ns()}"
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
-    return session_root / ".book-gen" / "images" / f"{prefix}-{digest}.png"
+    return session_root / _BOOK_GEN_DIR / "images" / f"{prefix}-{digest}.png"
 
 
 def generate_page_illustration_tool(
@@ -1916,7 +1918,7 @@ def render_book_tool(
             )
 
         impose = bool(input_.get("impose", False))
-        source_dir = Path(get_session_root()) / ".book-gen"
+        source_dir = Path(get_session_root()) / _BOOK_GEN_DIR
         output_dir = source_dir / "output"
         slug = slugify(draft.title)
         # next_version_number needs the directory to exist so it can
