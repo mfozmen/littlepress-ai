@@ -480,11 +480,12 @@ def restore_page_tool(
         stem = f"page-{page_n:02d}"
         # Accept any extension pdf_ingest may have written — PNG and
         # JPEG are the common shapes, but ``_extension_for`` returns
-        # whatever PIL detected (WebP, GIF, TIFF, BMP on exotic PDFs).
-        # The allow-list here is the known PIL image formats: it's
-        # permissive enough for every format pdf_ingest can produce,
-        # but still rejects stray non-image files (e.g. an accidental
-        # ``page-01.txt``) that would break the renderer downstream.
+        # whatever PIL detected (WebP, GIF, TIFF, BMP, or JPEG2000
+        # from ``/JPXDecode`` streams on exotic PDFs). The allow-list
+        # here is the known PIL image formats: it's permissive enough
+        # for every format pdf_ingest can produce, but still rejects
+        # stray non-image files (e.g. an accidental ``page-01.txt``)
+        # that would break the renderer downstream.
         candidates = sorted(
             p
             for p in images_dir.glob(f"{stem}.*")
