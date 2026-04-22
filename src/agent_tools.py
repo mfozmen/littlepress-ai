@@ -373,6 +373,14 @@ def apply_text_correction_tool(get_draft: Callable[[], Draft | None]) -> Tool:
     ``text`` is written straight into ``page.text``. The agent MUST
     NOT initiate this tool on its own; it is a user-initiated
     correction path.
+
+    Side effect: if the target page is currently ``hidden=True`` the
+    tool also clears the flag. A user issuing a correction on a
+    hidden page almost certainly means "bring this page back with
+    this text"; silently writing to ``page.text`` while the page is
+    filtered out of the render by ``to_book`` would be a misleading
+    no-op. The auto-unhide is named in the reply so the action is
+    visible.
     """
 
     def handler(input_: dict) -> str:
@@ -403,7 +411,10 @@ def apply_text_correction_tool(get_draft: Callable[[], Draft | None]) -> Tool:
             "verbatim. Use this ONLY during the post-render review turn "
             "when the user says 'page N text: ...'. Do not invent or "
             "paraphrase — the ``text`` field is written into page.text "
-            "exactly as passed in. Never call on your own initiative."
+            "exactly as passed in. If page N was hidden, this tool also "
+            "unhides it (a correction on a hidden page implies the user "
+            "wants it visible); the reply names the auto-unhide "
+            "explicitly. Never call on your own initiative."
         ),
         input_schema={
             "type": "object",
@@ -425,10 +436,13 @@ def restore_page_tool(
     original output and clearing the ``hidden`` flag.
 
     Concrete realisation of the input-preserved guarantee:
-    ``.book-gen/images/page-NN.png`` is never deleted, so the child's
-    original drawing is always available to re-attach. Called when the
-    user says 'page N restore' during the review turn. For a text
-    reset, call ``apply_text_correction`` with the original string.
+    ``.book-gen/images/page-NN.*`` (the extension depends on what
+    ``pdf_ingest._extension_for`` derived from the PDF's embedded
+    image — commonly ``.png`` or ``.jpg``; in principle any format
+    PIL reports) is never deleted, so the child's original drawing
+    is always available to re-attach. Called when the user says
+    'page N restore' during the review turn. For a text reset, call
+    ``apply_text_correction`` with the original string.
     """
 
     def handler(input_: dict) -> str:
@@ -445,10 +459,12 @@ def restore_page_tool(
         page.hidden = False
         images_dir = Path(get_session_root()) / _BOOK_GEN_DIR / "images"
         stem = f"page-{page_n:02d}"
+        # Accept any extension pdf_ingest may have written — PNG and
+        # JPEG are the common shapes, but ``_extension_for`` returns
+        # whatever PIL detected (WebP, GIF, TIFF, BMP on exotic PDFs).
+        # This directory is owned by Littlepress; we trust what's in it.
         candidates = sorted(
-            p
-            for p in images_dir.glob(f"{stem}.*")
-            if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+            p for p in images_dir.glob(f"{stem}.*") if p.is_file()
         )
         # Prefer PNG if the same page has multiple extensions on disk
         # (deterministic — png is lossless, so keep it when present).
@@ -469,10 +485,11 @@ def restore_page_tool(
         description=(
             "Undo edits on page N: clear the hidden flag and re-attach "
             "the child's original drawing from pdf_ingest's per-page "
-            "output (``.book-gen/images/page-NN.png``). Use during the "
-            "post-render review turn when the user says 'page N "
-            "restore'. For a text reset, call apply_text_correction "
-            "with the original string instead."
+            "output (``.book-gen/images/page-NN.*`` — extension depends "
+            "on what the PDF embedded, usually ``.png`` or ``.jpg``). "
+            "Use during the post-render review turn when the user says "
+            "'page N restore'. For a text reset, call "
+            "apply_text_correction with the original string instead."
         ),
         input_schema={
             "type": "object",

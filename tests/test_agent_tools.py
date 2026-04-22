@@ -3638,6 +3638,65 @@ def test_restore_page_finds_jpg_extracted_drawing(tmp_path):
     assert draft.pages[0].image == original_jpg
 
 
+def test_restore_page_accepts_exotic_extensions_pdf_ingest_may_write(tmp_path):
+    """Regression for PR #60 round-3 #1: ``pdf_ingest._extension_for``
+    returns whatever PIL detected (``jpeg`` remapped to ``jpg``;
+    everything else passed through). A PDF embedding WebP / GIF /
+    TIFF lands as ``page-NN.webp`` etc. The restore path must accept
+    any extension under the trusted ``.book-gen/images/`` directory,
+    not a hardcoded allow-list."""
+    from src.agent_tools import restore_page_tool
+    from src.draft import Draft, DraftPage
+
+    images = tmp_path / ".book-gen" / "images"
+    images.mkdir(parents=True)
+    # Byte content doesn't matter for this test — restore_page only
+    # checks the file's existence and attaches the Path to page.image.
+    exotic = images / "page-01.webp"
+    exotic.write_bytes(b"fake-webp-bytes")
+
+    draft = Draft(
+        source_pdf=tmp_path / "draft.pdf",
+        pages=[DraftPage(text="edited", image=None, hidden=True)],
+    )
+    tool = restore_page_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    tool.handler({"page": 1})
+
+    assert draft.pages[0].hidden is False
+    assert draft.pages[0].image == exotic
+
+
+def test_restore_page_description_mentions_multi_extension_support():
+    """Regression for PR #60 round-3 #2: description is surfaced to
+    the agent; it must not claim a hardcoded ``.png`` when the handler
+    actually globs ``page-NN.*``."""
+    from src.agent_tools import restore_page_tool
+
+    tool = restore_page_tool(
+        get_draft=lambda: None,
+        get_session_root=lambda: Path("."),
+    )
+
+    desc = tool.description
+    assert "page-NN.*" in desc or ".jpg" in desc.lower()
+
+
+def test_apply_text_correction_description_mentions_auto_unhide():
+    """Regression for PR #60 round-3 #3: description is surfaced to
+    the agent; the auto-unhide side effect must be named so the agent
+    can describe it correctly to the user."""
+    from src.agent_tools import apply_text_correction_tool
+
+    tool = apply_text_correction_tool(get_draft=lambda: None)
+
+    desc = tool.description.lower()
+    assert "unhide" in desc or "hidden" in desc
+
+
 def test_restore_page_prefers_png_when_both_exist(tmp_path):
     """Determinism: when both .png and .jpg exist for the same page,
     prefer .png."""
