@@ -303,12 +303,21 @@ def _one_page_draft(text):
     )
 
 
-def test_propose_typo_fix_applies_change_when_user_confirms():
-    draft = _one_page_draft("the dragn was sad")
-    tool = propose_typo_fix_tool(
-        get_draft=lambda: draft,
-        confirm=lambda _prompt: True,
+def test_propose_typo_fix_auto_applies_without_confirm(tmp_path):
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        pages=[DraftPage(text="Bir gün ıçinden çıktı")],
     )
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)  # no confirm kwarg
+
+    tool.handler({"page": 1, "before": "ıçinden", "after": "içinden", "reason": "ocr"})
+
+    assert draft.pages[0].text == "Bir gün içinden çıktı"
+
+
+def test_propose_typo_fix_applies_change():
+    draft = _one_page_draft("the dragn was sad")
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)
 
     result = tool.handler(
         {
@@ -323,28 +332,9 @@ def test_propose_typo_fix_applies_change_when_user_confirms():
     assert "applied" in result.lower()
 
 
-def test_propose_typo_fix_does_not_change_draft_when_user_declines():
-    draft = _one_page_draft("the dragn was sad")
-    tool = propose_typo_fix_tool(
-        get_draft=lambda: draft,
-        confirm=lambda _prompt: False,
-    )
-
-    result = tool.handler(
-        {"page": 1, "before": "dragn", "after": "dragon", "reason": "typo"}
-    )
-
-    assert draft.pages[0].text == "the dragn was sad"
-    assert "declin" in result.lower() or "kept" in result.lower()
-
-
 def test_propose_typo_fix_rejects_when_before_string_not_on_page():
     draft = _one_page_draft("the dragon was sad")
-    confirmed = []
-    tool = propose_typo_fix_tool(
-        get_draft=lambda: draft,
-        confirm=lambda p: confirmed.append(p) or True,
-    )
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)
 
     result = tool.handler(
         {"page": 1, "before": "BOOM", "after": "boom", "reason": "style"}
@@ -354,13 +344,11 @@ def test_propose_typo_fix_rejects_when_before_string_not_on_page():
     # substring has to actually exist on the page.
     assert draft.pages[0].text == "the dragon was sad"
     assert "not found" in result.lower() or "does not" in result.lower()
-    # User was never asked (we rejected before prompting).
-    assert confirmed == []
 
 
 def test_propose_typo_fix_rejects_out_of_range_page():
     draft = _one_page_draft("hi")
-    tool = propose_typo_fix_tool(get_draft=lambda: draft, confirm=lambda _p: True)
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)
 
     result = tool.handler(
         {"page": 99, "before": "hi", "after": "bye", "reason": "x"}
@@ -374,7 +362,7 @@ def test_propose_typo_fix_refuses_multi_word_rewrites():
     """preserve-child-voice: only mechanical substitutions are allowed.
     A whole-sentence or multi-word rewrite is a story change in disguise."""
     draft = _one_page_draft("the dragon was sad")
-    tool = propose_typo_fix_tool(get_draft=lambda: draft, confirm=lambda _p: True)
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)
 
     result = tool.handler(
         {
@@ -392,7 +380,7 @@ def test_propose_typo_fix_refuses_multi_word_rewrites():
 
 
 def test_propose_typo_fix_requires_draft_to_be_loaded():
-    tool = propose_typo_fix_tool(get_draft=lambda: None, confirm=lambda _p: True)
+    tool = propose_typo_fix_tool(get_draft=lambda: None)
 
     result = tool.handler(
         {"page": 1, "before": "x", "after": "y", "reason": "r"}
@@ -405,13 +393,9 @@ def test_propose_typo_fix_rejects_empty_before_string():
     """preserve-child-voice: an empty 'before' is text insertion, not a
     typo fix. `"" in s` is always True and `s.replace("", x, 1)` prepends
     x at position 0 — the agent could insert arbitrary content into the
-    child's pages with a single y/n. Reject before prompting."""
+    child's pages without any gate. Reject unconditionally."""
     draft = _one_page_draft("the dragon was sad")
-    confirmed = []
-    tool = propose_typo_fix_tool(
-        get_draft=lambda: draft,
-        confirm=lambda p: confirmed.append(p) or True,
-    )
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)
 
     result = tool.handler(
         {"page": 1, "before": "", "after": "Once upon a time, ", "reason": "intro"}
@@ -419,18 +403,13 @@ def test_propose_typo_fix_rejects_empty_before_string():
 
     assert draft.pages[0].text == "the dragon was sad"
     assert "empty" in result.lower() or "cannot be empty" in result.lower()
-    assert confirmed == []  # user was never asked
 
 
 def test_propose_typo_fix_uses_word_boundary_match():
     """'cat' → 'dog' must NOT rewrite 'scatter' to 'sdogter'. The match
     has to be a whole word."""
     draft = _one_page_draft("the cat scatter around")
-    confirmed_prompts = []
-    tool = propose_typo_fix_tool(
-        get_draft=lambda: draft,
-        confirm=lambda p: confirmed_prompts.append(p) or True,
-    )
+    tool = propose_typo_fix_tool(get_draft=lambda: draft)
 
     result = tool.handler(
         {"page": 1, "before": "cat", "after": "dog", "reason": "spelling"}
@@ -441,29 +420,8 @@ def test_propose_typo_fix_uses_word_boundary_match():
     assert "applied" in result.lower()
 
 
-def test_propose_typo_fix_prompt_includes_surrounding_context():
-    """The y/n prompt must show enough surrounding text that the user
-    can see exactly what's changing — not just 'cat → dog'."""
-    draft = _one_page_draft("once the dragn flew over the mountain")
-    captured = []
-    tool = propose_typo_fix_tool(
-        get_draft=lambda: draft,
-        confirm=lambda p: captured.append(p) or True,
-    )
-
-    tool.handler(
-        {"page": 1, "before": "dragn", "after": "dragon", "reason": "typo"}
-    )
-
-    assert captured, "user should have been prompted"
-    prompt = captured[0]
-    # Some context around the match is in the prompt (any neighbouring
-    # word from the page text is enough).
-    assert "flew" in prompt or "once" in prompt or "the" in prompt
-
-
 def test_propose_typo_fix_schema_lists_all_required_fields():
-    tool = propose_typo_fix_tool(get_draft=lambda: None, confirm=lambda _p: True)
+    tool = propose_typo_fix_tool(get_draft=lambda: None)
 
     required = set(tool.input_schema.get("required", []))
     assert required == {"page", "before", "after", "reason"}

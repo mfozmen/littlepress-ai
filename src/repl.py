@@ -304,7 +304,7 @@ class Repl:
         get_session_root = lambda: self._session_root or Path.cwd()  # noqa: E731
         tools = [
             read_draft_tool(get_draft=get_draft),
-            propose_typo_fix_tool(get_draft=get_draft, confirm=self._confirm),
+            propose_typo_fix_tool(get_draft=get_draft),
             set_metadata_tool(get_draft=get_draft),
             set_cover_tool(get_draft=get_draft),
             choose_layout_tool(get_draft=get_draft),

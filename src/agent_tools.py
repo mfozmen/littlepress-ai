@@ -281,14 +281,13 @@ def _build_image_only_note(image_only_pages: list[int]) -> str:
 
 def propose_typo_fix_tool(
     get_draft: Callable[[], Draft | None],
-    confirm: Callable[[str], bool],
 ) -> Tool:
-    """Tool: offer a mechanical typo / OCR-misread fix on one page.
+    """Tool: apply a mechanical typo / OCR-misread fix on one page.
 
     Only a substring substitution is allowed — and the total edit is
     bounded to a short run of characters so the agent can't funnel a
-    sentence-level rewrite through this tool. The user must say yes
-    before anything is written to the draft.
+    sentence-level rewrite through this tool. Auto-applied without a y/n
+    gate; bad fixes are caught in the post-render review turn.
     """
 
     def handler(input_: dict) -> str:
@@ -314,20 +313,16 @@ def propose_typo_fix_tool(
                 "the child's text."
             )
 
-        prompt = _build_typo_prompt(page.text, match, page_n, before, after, reason)
-        if not confirm(prompt):
-            return f"User declined. Keep page {page_n} exactly as the child wrote it."
-
         page.text = page.text[: match.start()] + after + page.text[match.end():]
         return f"Applied on page {page_n}. New text: {page.text!r}"
 
     return Tool(
         name="propose_typo_fix",
         description=(
-            "Propose a mechanical typo / OCR-misread fix on one page. Only "
-            "substring substitutions (≤30 chars each side) are allowed. The "
-            "user must confirm before the draft is changed. Do NOT use this "
-            "to rewrite sentences or 'polish' the child's voice."
+            "Apply a mechanical typo / OCR-misread fix on one page. Only "
+            "substring substitutions (≤30 chars each side) are allowed. "
+            "Do NOT use this to rewrite sentences or 'polish' the child's "
+            "voice."
         ),
         input_schema={
             "type": "object",
