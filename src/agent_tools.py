@@ -102,12 +102,23 @@ _MAX_TYPO_WORDS = 3
 _MSG_NO_DRAFT = "No draft loaded. Ask the user to provide a PDF first."
 _BOOK_GEN_DIR = ".book-gen"
 # Extensions pdf_ingest._extension_for may emit. Broader than just the
-# common PNG/JPG pair so a PDF embedding WebP/GIF/TIFF/BMP (rare but
-# legal) still round-trips through restore_page; narrow enough that an
-# accidental stray ``.txt`` / ``.json`` in ``.book-gen/images/`` is not
-# attached as a page image and later crashed by the renderer.
+# common PNG/JPG pair so a PDF embedding WebP/GIF/TIFF/BMP/JPEG2000
+# (rare but legal — PDF supports ``/JPXDecode`` for JPEG2000) still
+# round-trips through restore_page; narrow enough that an accidental
+# stray ``.txt`` / ``.json`` in ``.book-gen/images/`` is not attached
+# as a page image and later crashed by the renderer.
 _PIL_IMAGE_EXTS = frozenset(
-    {".png", ".jpg", ".jpeg", ".webp", ".gif", ".tiff", ".tif", ".bmp"}
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".jpeg2000",
+        ".webp",
+        ".gif",
+        ".tiff",
+        ".tif",
+        ".bmp",
+    }
 )
 _MSG_UNSET = "(unset — ask the user)"
 

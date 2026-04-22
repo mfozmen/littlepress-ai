@@ -3639,12 +3639,15 @@ def test_restore_page_finds_jpg_extracted_drawing(tmp_path):
 
 
 def test_restore_page_accepts_exotic_extensions_pdf_ingest_may_write(tmp_path):
-    """Regression for PR #60 round-3 #1: ``pdf_ingest._extension_for``
-    returns whatever PIL detected (``jpeg`` remapped to ``jpg``;
-    everything else passed through). A PDF embedding WebP / GIF /
-    TIFF lands as ``page-NN.webp`` etc. The restore path must accept
-    any extension under the trusted ``.book-gen/images/`` directory,
-    not a hardcoded allow-list."""
+    """Regression for PR #60 round-3 #1 (scope tightened in round-4):
+    ``pdf_ingest._extension_for`` returns whatever PIL detected
+    (``jpeg`` remapped to ``jpg``; everything else passed through).
+    A PDF embedding WebP / GIF / TIFF / JPEG2000 lands as
+    ``page-NN.webp`` / ``page-NN.jpeg2000`` / etc. The restore path
+    must accept any extension in the PIL-known image-format
+    allow-list (round-4 re-added the allow-list to reject accidental
+    ``page-NN.txt`` strays; round-5 widened it to include
+    ``.jpeg2000`` for PDF ``/JPXDecode`` streams)."""
     from src.agent_tools import restore_page_tool
     from src.draft import Draft, DraftPage
 
@@ -3700,6 +3703,37 @@ def test_apply_text_correction_description_mentions_auto_unhide():
 
     desc = tool.description.lower()
     assert "unhide" in desc
+
+
+def test_restore_page_accepts_jpeg2000_from_jpxdecode_streams(tmp_path):
+    """Regression for PR #60 round-5 #1: PDFs can embed JPEG2000 via
+    the ``/JPXDecode`` filter. PIL's format name is ``"JPEG2000"``,
+    so ``pdf_ingest._extension_for`` writes ``page-NN.jpeg2000``.
+    The restore-page allow-list must include ``.jpeg2000`` alongside
+    the common PNG/JPG pair."""
+    from src.agent_tools import restore_page_tool
+    from src.draft import Draft, DraftPage
+
+    images = tmp_path / ".book-gen" / "images"
+    images.mkdir(parents=True)
+    # Byte content doesn't matter for the test — restore_page only
+    # checks file existence and attaches the Path.
+    j2k = images / "page-01.jpeg2000"
+    j2k.write_bytes(b"fake-jpeg2000-bytes")
+
+    draft = Draft(
+        source_pdf=tmp_path / "draft.pdf",
+        pages=[DraftPage(text="edited", image=None, hidden=True)],
+    )
+    tool = restore_page_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+    )
+
+    tool.handler({"page": 1})
+
+    assert draft.pages[0].hidden is False
+    assert draft.pages[0].image == j2k
 
 
 def test_restore_page_ignores_non_image_strays(tmp_path):
