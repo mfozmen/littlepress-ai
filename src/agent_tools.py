@@ -122,6 +122,16 @@ _PIL_IMAGE_EXTS = frozenset(
 )
 _MSG_UNSET = "(unset — ask the user)"
 
+# Single source of truth for the "don't echo this / don't ask for
+# approval" suffix every auto-applying tool appends to its success
+# reply. Centralised so the four sentinel branches in
+# ``_apply_sentinel_result`` and the ``propose_typo_fix_tool``
+# handler stay lockstep — no per-branch wording drift ("this text"
+# vs "this status") for future reviews to catch.
+_NO_DISPLAY_NO_APPROVAL_SUFFIX = (
+    "Continue; do not display or ask for approval."
+)
+
 
 def _reject_typo_fix(
     draft: Draft, page_n: int, before: str, after: str
@@ -313,8 +323,8 @@ def propose_typo_fix_tool(
         reason_tag = f" ({reason})" if reason else ""
         return (
             f"Applied typo fix on page {page_n}{reason_tag} "
-            f"({len(before)} → {len(after)} chars). Continue; "
-            f"do not display this status or ask for approval."
+            f"({len(before)} → {len(after)} chars). "
+            + _NO_DISPLAY_NO_APPROVAL_SUFFIX
         )
 
     return Tool(
@@ -1018,9 +1028,8 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
         page.layout = "text-only"
         return (
             f"Page {page_n} transcribed ({len(reply)} chars, "
-            f"pure text, layout text-only). Continue with the "
-            f"next page; do not display this text or ask for "
-            f"approval."
+            f"pure text, layout text-only). "
+            + _NO_DISPLAY_NO_APPROVAL_SUFFIX
         )
 
     sentinel, body = _extract_sentinel(reply)
@@ -1028,9 +1037,8 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
     if sentinel == _BLANK_SENTINEL:
         page.hidden = True
         return (
-            f"Page {page_n} is blank, hidden. Continue with the "
-            f"next page; do not display this status or ask for "
-            f"approval."
+            f"Page {page_n} is blank, hidden. "
+            + _NO_DISPLAY_NO_APPROVAL_SUFFIX
         )
 
     if sentinel == _TEXT_SENTINEL:
@@ -1039,9 +1047,8 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
         page.layout = "text-only"
         return (
             f"Page {page_n} transcribed ({len(body)} chars, "
-            f"pure text, layout text-only). Continue with the "
-            f"next page; do not display this text or ask for "
-            f"approval."
+            f"pure text, layout text-only). "
+            + _NO_DISPLAY_NO_APPROVAL_SUFFIX
         )
 
     if sentinel == _MIXED_SENTINEL:
@@ -1049,8 +1056,7 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
         return (
             f"Page {page_n} transcribed ({len(body)} chars, "
             f"drawing preserved, image and layout unchanged). "
-            f"Continue with the next page; do not display this "
-            f"text or ask for approval."
+            + _NO_DISPLAY_NO_APPROVAL_SUFFIX
         )
 
     # No recognised sentinel — model misbehaved. Write the raw reply
@@ -1062,8 +1068,8 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
     return (
         f"(warning: model did not use a sentinel) page {page_n} "
         f"text written ({len(reply)} chars, image and layout "
-        f"unchanged). Continue with the next page; do not display "
-        f"this text or ask for approval."
+        f"unchanged). "
+        + _NO_DISPLAY_NO_APPROVAL_SUFFIX
     )
 
 

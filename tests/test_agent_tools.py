@@ -3822,10 +3822,10 @@ def test_transcribe_page_unknown_sentinel_fallback_preserves_image_and_layout(tm
 
 def test_transcribe_page_responses_never_include_transcribed_text_preview(tmp_path):
     """Regression for PR #62: the tool response used to include a
-    ``Preview: 'YAVRU DİNOZOR 1 Bir gün ...'`` snippet of the
-    transcribed text. The LLM, on seeing the text, defaulted to the
-    old show-text-to-user + ask-for-approval pattern. Responses must
-    be metadata-only across ALL four branches so there's nothing for
+    ``Preview: '<first 80 chars of transcribed text>'`` snippet. The
+    LLM, on seeing the text, defaulted to the old
+    show-text-to-user + ask-for-approval pattern. Responses must be
+    metadata-only across ALL four branches so there's nothing for
     the agent to theatricalise."""
     img = _tiny_png(tmp_path / "p.png")
 
