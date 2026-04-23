@@ -125,7 +125,7 @@ _MSG_UNSET = "(unset — ask the user)"
 # Single source of truth for the "don't echo this / don't ask for
 # approval" suffix every auto-applying tool appends to its success
 # reply. Centralised so the four sentinel branches in
-# ``_apply_sentinel_result`` and the ``propose_typo_fix_tool``
+# ``apply_sentinel_result`` and the ``propose_typo_fix_tool``
 # handler stay lockstep — no per-branch wording drift ("this text"
 # vs "this status") for future reviews to catch.
 _NO_DISPLAY_NO_APPROVAL_SUFFIX = (
@@ -266,22 +266,23 @@ def _read_draft_page_lines(draft: Draft) -> tuple[list[str], list[int]]:
 
 
 def _build_image_only_note(image_only_pages: list[int]) -> str:
-    """Single summary NOTE telling the agent to OCR flagged pages
-    via ``transcribe_page`` (or ask the user to transcribe by hand)
-    — preserve-child-voice in one place, not per page."""
+    """Single summary NOTE telling the agent why some pages are still
+    flagged image-only after deterministic ingestion ran — and what
+    to do about them (nothing, during the metadata phase)."""
     which = ", ".join(str(n) for n in image_only_pages)
     return (
         f"NOTE: page(s) {which} are image-only — the PDF has no "
         "text layer there, likely a Samsung Notes / phone-scan "
-        "export where the text is rendered inside the image. "
-        "Use the ``transcribe_page`` tool to OCR each flagged "
-        "page via the active LLM's vision capability (Claude 3+, "
-        "GPT-4o, Gemini 1.5+), or ask the user to transcribe "
-        "manually. The ``transcribe_page`` tool auto-applies the "
-        "OCR result; the user audits the rendered PDF later and "
-        "can correct specific pages via ``apply_text_correction`` "
-        "in the review turn. Do not invent, paraphrase, or "
-        "'guess' the child's words — preserve-child-voice."
+        "export. Deterministic ingestion already ran OCR + sentinel "
+        "classification on every image-only page BEFORE your first "
+        "turn; if any remain flagged here it means the OCR call "
+        "failed (offline session, vision error) and the page "
+        "didn't get transcribed automatically. Do NOT call "
+        "``transcribe_page`` during the metadata phase to retry — "
+        "proceed with metadata + render, and the user can ask for "
+        "a re-OCR on the specific page in the post-render review "
+        "turn. Preserve-child-voice: do not invent, paraphrase, or "
+        "'guess' the child's words."
     )
 
 
@@ -715,7 +716,7 @@ def transcribe_page_tool(
         empty_msg = _check_empty_reply(cleaned, page_n, method)
         if empty_msg is not None:
             return empty_msg
-        return _apply_sentinel_result(page, cleaned, page_n, method)
+        return apply_sentinel_result(page, cleaned, page_n, method)
 
     return Tool(
         name="transcribe_page",
@@ -816,7 +817,7 @@ def _parse_transcribe_input(
     return page_n, page, None
 
 
-def _call_vision_for_transcription(
+def call_vision_for_transcription(
     llm: object, image_path: Path, page_n: int
 ) -> tuple[str, str | None]:
     """Send the page image to the active LLM and normalise errors
@@ -875,7 +876,7 @@ def _run_ocr_engine(
         return _call_tesseract_for_transcription(
             Path(page.image), page_n, lang
         )
-    return _call_vision_for_transcription(
+    return call_vision_for_transcription(
         get_llm(), Path(page.image), page_n
     )
 
@@ -983,7 +984,7 @@ def _check_empty_reply(cleaned: str, page_n: int, method: str) -> str | None:
     return None
 
 
-def _extract_sentinel(reply: str) -> tuple[str, str]:
+def extract_sentinel(reply: str) -> tuple[str, str]:
     """Parse the model's reply into ``(sentinel, body)``.
 
     The first *non-empty* line is normalised (whitespace + backtick/quote
@@ -1008,7 +1009,7 @@ def _extract_sentinel(reply: str) -> tuple[str, str]:
     return "", reply.strip()
 
 
-def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
+def apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
     """Parse the OCR reply and apply the appropriate action based on
     which sentinel the model used (or the fallback when it didn't).
 
@@ -1032,7 +1033,7 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
             + _NO_DISPLAY_NO_APPROVAL_SUFFIX
         )
 
-    sentinel, body = _extract_sentinel(reply)
+    sentinel, body = extract_sentinel(reply)
 
     if sentinel == _BLANK_SENTINEL:
         page.hidden = True

@@ -3404,11 +3404,11 @@ def test_restore_page_reports_no_draft_when_unloaded():
 
 
 def test_extract_sentinel_returns_empty_on_empty_or_whitespace_reply():
-    """Coverage for the empty-reply early-return in _extract_sentinel."""
-    from src.agent_tools import _extract_sentinel
+    """Coverage for the empty-reply early-return in extract_sentinel."""
+    from src.agent_tools import extract_sentinel
 
-    assert _extract_sentinel("") == ("", "")
-    assert _extract_sentinel("   \n  \n\t") == ("", "")
+    assert extract_sentinel("") == ("", "")
+    assert extract_sentinel("   \n  \n\t") == ("", "")
 
 
 def test_apply_text_correction_rejects_out_of_range(tmp_path):
@@ -3491,7 +3491,7 @@ def test_restore_page_rejects_out_of_range(tmp_path):
 
 
 def test_extract_sentinel_skips_leading_blank_line_before_sentinel():
-    """``_extract_sentinel`` must skip to the first *non-empty* line.
+    """``extract_sentinel`` must skip to the first *non-empty* line.
 
     A reply of ``"\\n<TEXT>\\nhello"`` has an empty first line; the
     sentinel ``<TEXT>`` is on line 2. Without the fix ``lines[0]`` is
@@ -3500,24 +3500,24 @@ def test_extract_sentinel_skips_leading_blank_line_before_sentinel():
     raw ``"<TEXT>\\nhello"`` string verbatim into ``page.text`` with a
     warning prefix.  After the fix the sentinel is recognised and the
     body is returned cleanly."""
-    from src.agent_tools import _extract_sentinel
+    from src.agent_tools import extract_sentinel
 
-    sentinel, body = _extract_sentinel("\n<TEXT>\nBir gün bir yumurta çatlamış")
+    sentinel, body = extract_sentinel("\n<TEXT>\nBir gün bir yumurta çatlamış")
     assert sentinel == "<TEXT>"
     assert body == "Bir gün bir yumurta çatlamış"
 
 
 def test_extract_sentinel_skips_leading_blank_lines_for_blank_and_mixed():
     """Same tolerance for ``<BLANK>`` (no body) and ``<MIXED>``."""
-    from src.agent_tools import _extract_sentinel
+    from src.agent_tools import extract_sentinel
 
     # Two leading blank lines before <BLANK>.
-    sentinel, body = _extract_sentinel("\n\n<BLANK>")
+    sentinel, body = extract_sentinel("\n\n<BLANK>")
     assert sentinel == "<BLANK>"
     assert body == ""
 
     # One leading blank line before <MIXED>.
-    sentinel, body = _extract_sentinel("\n<MIXED>\nKüçük dinozor")
+    sentinel, body = extract_sentinel("\n<MIXED>\nKüçük dinozor")
     assert sentinel == "<MIXED>"
     assert body == "Küçük dinozor"
 
@@ -3609,6 +3609,27 @@ def test_image_only_note_does_not_mandate_user_confirm():
     note = _build_image_only_note([1, 2]).lower()
     assert "always confirm" not in note
     assert "confirm the transcription with the user" not in note
+
+
+def test_image_only_note_does_not_tell_agent_to_call_transcribe_page():
+    """Regression for PR #65 #1: after deterministic ingestion ships,
+    the ``_build_image_only_note`` text is surfaced (via read_draft)
+    ONLY when ingestion left a page still flagged image-only — i.e.
+    OCR already failed for that page. The note must NOT re-instruct
+    the agent to run ``transcribe_page`` during the metadata phase;
+    that directly contradicts the new greeting and re-opens the
+    per-page confirm theatre this refactor killed. Re-OCR happens
+    on user request in the post-render review turn."""
+    from src.agent_tools import _build_image_only_note
+
+    note = _build_image_only_note([1, 2])
+    # Must NOT contain the old "call transcribe_page" directive.
+    assert "Use the ``transcribe_page`` tool to OCR" not in note
+    # Must acknowledge ingestion already ran and point the agent at
+    # the review-turn re-OCR path instead.
+    lower = note.lower()
+    assert "ingestion" in lower or "already ran" in lower
+    assert "review" in lower
 
 
 def test_restore_page_finds_jpg_extracted_drawing(tmp_path):

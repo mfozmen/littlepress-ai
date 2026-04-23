@@ -52,6 +52,7 @@ from src.providers.validator import (
     ProviderUnavailable,
     TransientValidationError,
 )
+from src.ingestion import ingest_image_only_pages
 
 
 SlashHandler = Callable[["Repl", str], int | None]
@@ -112,27 +113,13 @@ _AGENT_GREETING_HINT = (
     "you see their reply; keep slash commands like /model /render "
     "/load literal — they are REPL tokens, do NOT translate them). "
     "\n\n"
-    "PROCESS THE DRAFT AUTOMATICALLY. Do NOT ask the user per-page "
-    "confirmations — those days are over. Run the ingestion pipeline "
-    "end-to-end without stopping to confirm each mutation:\n"
-    "  - For every image-only page, call transcribe_page — the tool "
-    "classifies the image itself via <BLANK>/<TEXT>/<MIXED> sentinels "
-    "and handles image/text decisions automatically.\n"
-    "  - Apply obvious typo/OCR-misread fixes via propose_typo_fix "
-    "on your own judgement; the tool is bounded (3 words / 30 "
-    "chars) so you can't rewrite a sentence.\n"
-    "  - Pick per-page layouts via propose_layouts (batch) using "
-    "the select-page-layout skill's rules.\n"
-    "  - Do NOT ask the user to approve any of this — the tools no "
-    "longer take a confirm callback; they auto-apply.\n\n"
-    "BATCH THE INGESTION. Call transcribe_page for every image-only "
-    "page back-to-back in the same agent turn, then emit ONE short "
-    "status line (example: ``Transcribed 8 pages (0 blank, 8 with "
-    "handwritten text). Moving to metadata ...``) and proceed to "
-    "the metadata questions. Do not write per-page commentary, "
-    "previews, or any text that reads like a per-page approval "
-    "question — the user does not review intermediate transcriptions, "
-    "only the finished PDF.\n\n"
+    "The draft arrives already transcribed — ``littlepress`` ran OCR "
+    "and sentinel classification (``<BLANK>`` / ``<TEXT>`` / "
+    "``<MIXED>``) against every image-only page before your first "
+    "turn. Blank pages are already hidden. Do NOT call "
+    "``transcribe_page`` during the metadata phase; the tool stays "
+    "registered only so the user can request a re-OCR on a "
+    "specific page during the post-render review turn.\n\n"
     "ASK ONLY FOR THINGS YOU CANNOT INFER. Before the first render, "
     "collect from the user only:\n"
     "  - title (and author) — required, the child is the source of "
@@ -289,6 +276,7 @@ class Repl:
         or when no PDF was pre-loaded by the CLI."""
         if self._draft is None or isinstance(self._llm, NullProvider):
             return
+        self._run_ingestion()
         try:
             self._agent.say(_AGENT_GREETING_HINT)
         except Exception as e:
@@ -317,6 +305,18 @@ class Repl:
             self._persist_draft()
             if exit_code is not None:
                 return exit_code
+
+    def _run_ingestion(self) -> None:
+        """OCR every image-only page in the current draft before the
+        agent's first turn.  No-op when there is no draft, when the
+        provider is offline (NullProvider), or when all pages already
+        have text (idempotent)."""
+        if self._draft is None or isinstance(self._llm, NullProvider):
+            return
+        try:
+            ingest_image_only_pages(self._draft, self._llm, self._console)
+        except Exception as e:  # noqa: BLE001 — keep the load path alive
+            self._console.print(f"[dim]Auto-ingestion failed: {e}[/dim]")
 
     def _persist_draft(self) -> None:
         """Write the current draft to .book-gen/draft.json so the next
@@ -1083,6 +1083,9 @@ def _cmd_load(repl: Repl, args: str) -> None:
         f"[green]Loaded {len(draft.pages)} pages[/green] from {pdf_path.name} "
         f"({with_images} with an embedded illustration)."
     )
+    # OCR image-only pages deterministically before the agent's first
+    # turn — the agent must see a draft that's already been transcribed.
+    repl._run_ingestion()
     # Kick the agent off so the user doesn't stare at silence after the
     # load. Matches the CLI-arg bootstrap path. Offline (NullProvider)
     # stays quiet — there's no agent to greet with.

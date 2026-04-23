@@ -26,6 +26,7 @@ All five PRs from the original plan merged:
 | TBD | `feat/clearer-render-output-message` | P6 — ``render_book``'s success message now names each of the four output files by role: A5 stable (open + read), A4 booklet (print double-sided, fold, staple), and the two ``.vN`` snapshots (rollback only, safe to ignore). Fixes the "why is this producing four PDFs?" read from the Yavru Dinozor run. |
 | TBD | `feat/prune-cleanup` | New ``src/prune.py`` drops orphan images from ``.book-gen/images/`` (retry leftovers not referenced by the draft) and snapshot PDFs beyond the most-recent 3 versions. Auto-runs at the end of every versioned render (both agent ``render_book`` and REPL ``/render``); also exposed as a ``/prune [--dry-run] [--keep N]`` slash command. Stable ``<slug>.pdf`` / ``<slug>_A4_booklet.pdf`` pointers, ``input/``, and referenced cover/page images are never touched. |
 | #60 | `refactor/review-based-gate` | Move preserve-child-voice gate from per-mutation y/n confirm to post-render review loop. Input immutable contract (``.book-gen/input/`` + ``images/page-NN.*``). New tools: ``apply_text_correction``, ``restore_page``. Renamed: ``skip_page`` → ``hide_page``. ``transcribe_page`` three-sentinel vision classifier; no ``keep_image`` flag. ``propose_typo_fix`` / ``propose_layouts`` auto-apply. Only cost-incurring calls keep a confirm. |
+| #65 | `feat/deterministic-ingestion` | First sub-project of the "AI-only-for-judgment" refactor. `src/ingestion.py` runs OCR + sentinel classification (``<BLANK>`` / ``<TEXT>`` / ``<MIXED>``) on every image-only page in deterministic Python *before* the agent's first turn. REPL hooks into the load flow; the agent greeting no longer tells the agent to re-run the pipeline itself. Transcribe tool stays registered for post-render re-OCR requests. Metadata / cover / back-cover deterministic collection follows in a later sub-PR. |
 
 ## "Done when" checklist
 
@@ -44,40 +45,9 @@ All five PRs from the original plan merged:
 
 Items below came out of the first real end-to-end test (Yavru Dinozor). Listed roughly in "most visible to the user" order.
 
-- **Move ingestion out of the LLM loop entirely.** 2026-04-23 Yavru Dinozor v2 session (OpenAI this time) kept showing pre-refactor behaviour despite PR #60/#62/#63 landing:
-  - Per-page ``Apply this OCR transcription to page N? ... Approve? (y/n)`` prompts still fire.
-  - Confirm body explicitly names ``keep_image=true`` — a parameter that no longer exists in the codebase.
-  - ``skip_page`` confirm with ``drawing: YES — the drawing on this page will also be lost; removal is permanent`` + ``Remaining pages will renumber — page 7 becomes page 6`` — exactly the pre-rename ``skip_page_tool`` body, even though the tool is now ``hide_page`` with flag semantics and no confirm.
-  - Greeting asks ``is this book part of a series?`` — T11 removed the series question from the greeting.
-  - Metadata review checkpoint fires at the end ("I will summarize the metadata for you") — T11 removed that too.
-  - Cover step skipped entirely; agent never offers the three cover options.
-  - Language mismatch: agent mixes English / Turkish mid-flow, doesn't lock on the user's language after the first reply.
-  - Rendered book has no images at all (``<TEXT>`` sentinel cleared them; but the child's source is all Samsung-Notes-style handwriting scans — there's no "separate drawing" to preserve; user reasonably expects the handwriting scans themselves to survive).
-
-  The pattern says either (a) the user's installed binary is running pre-refactor bytecode that our ``pip install -e`` dance didn't fully replace, or (b) the LLM is reconstructing old UI from training memory at a rate stronger than prompt-level fixes can suppress — or most likely both, layered. Prompt engineering hit its limit over PR #61 → PR #63.
-
-  Real fix: **take ingestion off the agent loop**. Scoped as a broader principle — *deterministic Python collects data; LLM is for judgment only*. When ``cli.py`` / ``repl.py`` loads a PDF, the REPL itself iterates image-only pages, calls ``transcribe_page`` deterministically in Python (no agent turn), applies the three-sentinel outcome (TEXT / MIXED / BLANK), auto-hides blanks. The agent only starts talking *after* ingestion is complete — or, better, doesn't start talking at all for the questions the app can ask itself.
-
-  **What moves to deterministic Python (no LLM):**
-  - "What is the title?" / "Who is the author?" — plain prompts.
-  - "Is this book part of a series? (y/n) → which volume?" — plain prompts, recorded in the title.
-  - "Back-cover blurb — type it, or 'skip', or 'AI'" — plain prompt. If the user types 'AI' (or equivalent), *then* the LLM is invoked with the story context to draft a blurb, which the user approves / edits. Writing the blurb verbatim needs no LLM; generating one creatively does.
-  - "Cover: [1] use page N's drawing / [2] AI generate / [3] poster" — numbered menu. Only option [2] routes to the LLM (prompt wording + image generation).
-  - Metadata review + confirmation — printed summary + y/n.
-  - OCR ingestion — deterministic call to ``transcribe_page`` per image-only page.
-
-  **What stays LLM-driven (judgment / creativity only):**
-  - Vision OCR itself (image understanding).
-  - Three-sentinel classification ``<BLANK>`` / ``<TEXT>`` / ``<MIXED>`` (judgment on image content).
-  - AI cover prompt generation (creative).
-  - AI back-cover blurb generation when the user opts in (creative).
-  - Post-render review turn free-form parsing ("page 3 text: …", "restore page 5") — natural-language understanding over page-number-indexed user input.
-
-  Image-only-page ceremony vanishes entirely from the chat surface because the agent never sees it. The three-sentinel classifier stays — it just fires from a deterministic Python caller instead of through the LLM's tool-use loop.
-
-  Scope: ``src/cli.py`` (or ``src/repl.py``'s load flow) grows an ``_ingest_image_only_pages`` step. Agent greeting strips the "PROCESS THE DRAFT AUTOMATICALLY" section that instructs the agent to run the pipeline — the pipeline runs *before* the agent. Tests: a scripted-LLM integration that loads an 8-page Samsung-Notes fixture, asserts all OCR happens before the first agent turn, and asserts the agent's first message is "what's the title?" not a transcription batch. Estimated ~200 lines + tests.
-
-  This should be the next PR. Pairs with a session-state diagnostic (the editable install was verified at PR #60 / PR #63 time but keeps producing pre-refactor output for the user — something about the local install is still broken; needs root-cause before declaring the refactor "done").
+- **Continue the "AI-only-for-judgment" refactor.** Sub-project 1 (deterministic OCR ingestion) shipped (see Shipped / `feat/deterministic-ingestion`). Remaining sub-projects:
+  - **Sub-project 2 — Deterministic metadata collection.** Move title / author / series+volume / cover choice menu / back-cover default from the greeting's upfront-question block into plain Python prompts. LLM is invoked only when the user explicitly opts in (e.g. "AI blurb", "AI cover prompt"). ~150 lines, own spec+plan+PR cycle.
+  - **Sub-project 3 — (optional) Review-turn polish.** Possibly route review corrections through slash commands as well so the LLM's NL parsing is an explicit opt-in. Out of scope unless a real user test shows the free-form review is still too loose.
 
 - **Real-book pagination blanks in the A4 saddle-stitch imposition.** Surfaced alongside the review-based gate refactor (2026-04-22). The maintainer wants output blanks to follow real-book conventions — story starts on a right-hand (recto) page, total page count is padded to a multiple of 4 with blanks in "natural" positions (not tacked onto the end). Today `src/imposition.py` just hits the 4-page booklet requirement; this item formalises where the blanks go. Out of scope for the review-based-gate refactor (separate smaller PR).
 
