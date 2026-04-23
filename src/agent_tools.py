@@ -311,7 +311,11 @@ def propose_typo_fix_tool(
 
         page.text = page.text[: match.start()] + after + page.text[match.end():]
         reason_tag = f" ({reason})" if reason else ""
-        return f"Applied on page {page_n}{reason_tag}. New text: {page.text!r}"
+        return (
+            f"Applied typo fix on page {page_n}{reason_tag} "
+            f"({len(before)} → {len(after)} chars). Continue; "
+            f"do not display this status or ask for approval."
+        )
 
     return Tool(
         name="propose_typo_fix",
@@ -1025,7 +1029,8 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
         page.hidden = True
         return (
             f"Page {page_n} is blank, hidden. Continue with the "
-            f"next page; do not display or ask for approval."
+            f"next page; do not display this status or ask for "
+            f"approval."
         )
 
     if sentinel == _TEXT_SENTINEL:
