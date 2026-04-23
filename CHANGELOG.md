@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v1.11.1 (2026-04-23)
+
+### Bug Fixes
+
+- **repl**: Remove greeting's forbidden-pattern list that was feeding the LLM
+  ([`80d04b6`](https://github.com/mfozmen/littlepress-ai/commit/80d04b6c25e31c86f9ebd16ea153bc8de434dfaf))
+
+PR #61 added a "CRITICAL — NO FAKE CONFIRMATION UI" block to ``_AGENT_GREETING_HINT`` that
+  enumerated the old UI strings (``Apply this OCR transcription to page N?``, ``Approve? (y/n)``,
+  ``keep_image=True``, ...) as examples of what NOT to emit. In real-session testing Sonnet read the
+  list as a **template** and produced exactly those patterns verbatim — negation framing is weak for
+  LLMs, literal examples are strong. The fix was making the bug worse.
+
+Replaced the block with a positive instruction: batch all transcribe_page calls, emit ONE status
+  line, move to metadata. No literal strings for Sonnet to echo.
+
+Kept the earlier ``PROCESS THE DRAFT AUTOMATICALLY`` section's "Do NOT ask the user to approve any
+  of this" language; that one is generic enough not to be shape-matched.
+
+Full suite: 633 passing.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.11.0 (2026-04-23)
 
 ### Bug Fixes
@@ -61,6 +85,11 @@ Full suite: 633 passing (docs-only changes; no behaviour drift).
 Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.11.0 [skip ci]
+  ([`dacc425`](https://github.com/mfozmen/littlepress-ai/commit/dacc42572b1130038c1449797bd2a680a8d0f843))
 
 ### Documentation
 
