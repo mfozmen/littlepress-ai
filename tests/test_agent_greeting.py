@@ -201,6 +201,30 @@ def test_greeting_no_longer_references_old_skip_page_tool():
     assert "skip_page" not in _AGENT_GREETING_HINT
 
 
+def test_greeting_always_asks_series_question():
+    """Regression: the series question was shipped pre-refactor (PLAN's
+    feat/always-ask-series-question) and silently dropped during the
+    T11 greeting rewrite. The user uses the answer to record the
+    volume inside the title (e.g. ``My Series - 1``) so the cover
+    renderer picks it up naturally. Greeting must explicitly
+    instruct the agent to ALWAYS ask — every book, regardless of
+    what the title pattern looks like — and to follow up with the
+    volume number on a yes."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    g = _AGENT_GREETING_HINT.lower()
+    # Core signals the greeting must carry so the agent runs the flow.
+    assert "series" in g
+    assert "volume" in g
+    # Explicit "always ask" AND "every book" framing — the old
+    # feature's whole point was not letting the agent infer 'yes'
+    # from title shape. Both must appear (not ``or``): a future
+    # rewrite that keeps only one token would silently drop the
+    # anti-inference framing this test exists to pin.
+    assert "always" in g
+    assert "every book" in g
+
+
 def test_greeting_does_not_instruct_agent_to_pass_keep_image():
     """The ``keep_image`` parameter was removed from ``transcribe_page``
     in the review-based-gate refactor. The greeting may NAME the
