@@ -1788,16 +1788,16 @@ def propose_layouts_tool(
     return Tool(
         name="propose_layouts",
         description=(
-            "Propose the layout for EVERY page at once so the user can "
-            "approve the whole rhythm with a single yes/no instead of "
-            "answering per-page. Use this right after metadata is "
-            "settled. For surgical tweaks afterwards, use choose_layout. "
-            "Valid layouts: image-top, image-bottom, image-full, "
-            "text-only. Pages without a drawing must be text-only. "
+            "Set the layout for EVERY page at once in a single call. "
+            "Auto-applies — do NOT ask the user for a yes/no; the user "
+            "audits the finished PDF in the post-render review turn. "
+            "Use this right after metadata is settled. For surgical "
+            "tweaks afterwards, use choose_layout. Valid layouts: "
+            "image-top, image-bottom, image-full, text-only. Pages "
+            "without a drawing must be text-only. "
             + _RHYTHM_RULES_FOR_TOOL_DESC
             + " Since you see every page at once here, use that view "
-            "to make the cadence feel varied on paper — not just in the "
-            "summary table."
+            "to make the cadence feel varied on paper."
         ),
         input_schema={
             "type": "object",
