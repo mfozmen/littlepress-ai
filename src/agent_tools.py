@@ -1002,50 +1002,42 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
     Tesseract returns raw text — treated the same as ``<TEXT>``
     (clear image, set text-only) since Tesseract doesn't produce
     drawings alongside text."""
-    # Tool-response messages are intentionally minimal — NO preview
-    # of the transcribed text. If the response echoes the text back
-    # the agent tends to re-display it to the user and default to
-    # per-page approval prompts. The user audits page text in the
-    # rendered PDF, not in chat.
     if method == "tesseract":
         # Tesseract raw text: apply as TEXT sentinel behaviour.
         page.text = reply
         page.image = None
         page.layout = "text-only"
+        preview = reply[:80].replace("\n", " ")
         return (
-            f"Page {page_n} transcribed ({len(reply)} chars, "
-            f"pure text, layout text-only). Continue with the "
-            f"next page; do not display this text or ask for "
-            f"approval."
+            f"Page {page_n} transcribed and applied ({len(reply)} "
+            f"chars; source image cleared, layout text-only). "
+            f"Preview: {preview!r}."
         )
 
     sentinel, body = _extract_sentinel(reply)
 
     if sentinel == _BLANK_SENTINEL:
         page.hidden = True
-        return (
-            f"Page {page_n} is blank, hidden. Continue with the "
-            f"next page; do not display or ask for approval."
-        )
+        return f"Page {page_n} is blank — marked hidden."
 
     if sentinel == _TEXT_SENTINEL:
         page.text = body
         page.image = None
         page.layout = "text-only"
+        preview = body[:80].replace("\n", " ")
         return (
-            f"Page {page_n} transcribed ({len(body)} chars, "
-            f"pure text, layout text-only). Continue with the "
-            f"next page; do not display this text or ask for "
-            f"approval."
+            f"Page {page_n} transcribed as pure text ({len(body)} "
+            f"chars; source image cleared, layout text-only). "
+            f"Preview: {preview!r}."
         )
 
     if sentinel == _MIXED_SENTINEL:
         page.text = body
+        preview = body[:80].replace("\n", " ")
         return (
-            f"Page {page_n} transcribed ({len(body)} chars, "
-            f"drawing preserved, image and layout unchanged). "
-            f"Continue with the next page; do not display this "
-            f"text or ask for approval."
+            f"Page {page_n} transcribed, drawing preserved "
+            f"({len(body)} chars; image and layout unchanged). "
+            f"Preview: {preview!r}."
         )
 
     # No recognised sentinel — model misbehaved. Write the raw reply
@@ -1054,11 +1046,12 @@ def _apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
     # drawing until the user audits the render and corrects via
     # apply_text_correction / restore_page in the review turn.
     page.text = reply
+    preview = reply[:80].replace("\n", " ")
     return (
-        f"(warning: model did not use a sentinel) page {page_n} "
-        f"text written ({len(reply)} chars, image and layout "
-        f"unchanged). Continue with the next page; do not display "
-        f"this text or ask for approval."
+        f"(warning: model didn't use a sentinel) page {page_n} "
+        f"text written ({len(reply)} chars); image and layout "
+        f"unchanged — user should review in rendered PDF. "
+        f"Preview: {preview!r}."
     )
 
 
