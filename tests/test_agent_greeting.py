@@ -153,8 +153,13 @@ def test_greeting_drives_auto_ingest_then_review_turn():
     from src.repl import _AGENT_GREETING_HINT
 
     g = _AGENT_GREETING_HINT.lower()
-    # Auto-ingest signals.
-    assert "transcribe_page" in g
+    # Auto-apply signal — the greeting must tell the agent not to
+    # re-run ingestion even though transcribe_page still exists as a
+    # review-turn tool. ``"transcribe_page" in g`` alone is vacuous
+    # (it passes whether the greeting says "call transcribe_page" or
+    # "do NOT call transcribe_page"); the real intent is covered by
+    # test_greeting_tells_agent_the_draft_is_already_processed, which
+    # pins the "already processed" signal separately.
     assert ("auto" in g) or ("without asking" in g) or ("do not ask" in g)
     # Review turn.
     assert "render" in g and ("issues" in g or "review" in g)
@@ -276,3 +281,38 @@ def test_greeting_instructs_language_neutral_exit_recognition():
     # The instruction names intent-recognition rather than a fixed
     # multilingual token list.
     assert "language" in g or "any language" in g or "intent" in g
+
+
+def test_greeting_no_longer_tells_agent_to_process_the_draft_itself():
+    """After the deterministic-ingestion PR, ``littlepress`` does the
+    OCR + sentinel work before the agent's first turn. The greeting
+    must NOT still tell the agent to run transcribe_page in a batch
+    — that was the old flow and those phrases invited the LLM to
+    reconstruct the pre-refactor UI from training memory."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    forbidden = [
+        "PROCESS THE DRAFT AUTOMATICALLY",
+        "BATCH THE INGESTION",
+        "For every image-only page, call transcribe_page",
+        "Run the ingestion pipeline",
+    ]
+    for phrase in forbidden:
+        assert phrase not in _AGENT_GREETING_HINT, (
+            f"stale ingestion directive leaked into greeting: {phrase!r}"
+        )
+
+
+def test_greeting_tells_agent_the_draft_is_already_processed():
+    """Conversely, the new hint should tell the agent the draft
+    arrives already transcribed so it doesn't try to redo the work."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    g = _AGENT_GREETING_HINT.lower()
+    # Any of these phrasings signals "ingestion already happened".
+    assert (
+        "already transcribed" in g
+        or "already processed" in g
+        or "pre-processed" in g
+        or "already been" in g
+    )
