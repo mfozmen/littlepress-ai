@@ -33,12 +33,28 @@ Design notes:
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from rich.console import Console
 
 from src.draft import Draft
 
 ReadLine = Callable[[], str]
+
+
+@dataclass(frozen=True)
+class MetadataChoices:
+    """The two AI-branch tags returned by ``collect_metadata``.
+
+    Deterministic branches (page-drawing cover, poster, none-blurb,
+    self-written blurb) mutate the draft directly — the REPL doesn't
+    need to act on them. The AI branches (``cover == "ai"`` and
+    ``back_cover == "ai-draft"``) leave the draft fields untouched
+    and defer the work to the agent's first turn.
+    """
+
+    cover: str
+    back_cover: str
 
 
 _YES_TOKENS = frozenset({"y", "yes", "e", "evet"})
@@ -182,3 +198,25 @@ def collect_back_cover(
             return "self-written"
         if answer == "c":
             return "ai-draft"
+
+
+def collect_metadata(
+    draft: Draft, read_line: ReadLine, console: Console
+) -> MetadataChoices:
+    """Run the five deterministic prompts in order: title → author →
+    series → cover → back-cover.
+
+    Returns a ``MetadataChoices`` with the two AI-branch tags.
+    Deterministic branches mutate the draft in place; AI branches
+    leave the corresponding draft fields untouched so the agent's
+    first turn can fill them in via the existing tool surface
+    (``generate_cover_illustration`` for cover AI,
+    ``set_metadata(field="back_cover_text", value=…)`` for back-
+    cover AI after the user accepts the draft).
+    """
+    collect_title(draft, read_line, console)
+    collect_author(draft, read_line, console)
+    collect_series(draft, read_line, console)
+    cover = collect_cover_choice(draft, read_line, console)
+    back_cover = collect_back_cover(draft, read_line, console)
+    return MetadataChoices(cover=cover, back_cover=back_cover)

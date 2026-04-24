@@ -383,3 +383,73 @@ def test_collect_back_cover_reprompts_on_unclear_answer(tmp_path):
     result = collect_back_cover(draft, _scripted(["x", "a"]), _console())
 
     assert result == "none"
+
+
+# ---------------------------------------------------------------------------
+# collect_metadata — orchestrator
+# ---------------------------------------------------------------------------
+# The orchestrator runs the five prompts in their canonical order and
+# returns the two AI-branch tags the REPL needs to decide whether to
+# hand off to the agent's first turn for AI cover / AI back-cover
+# work. Title / author / series / poster / page-drawing cover / none
+# / self-written blurb are all applied deterministically by the
+# individual helpers; only AI branches defer.
+
+
+def test_collect_metadata_runs_all_five_prompts_in_order(tmp_path):
+    from src.metadata_prompts import MetadataChoices, collect_metadata
+
+    draft = _draft_with_pages(tmp_path, [("page-01.png", False)])
+
+    choices = collect_metadata(
+        draft,
+        _scripted([
+            "The Brave Owl",  # title
+            "Ece",             # author
+            "n",               # not a series
+            "a",               # cover: page-drawing
+            "a",               # back-cover: none
+        ]),
+        _console(),
+    )
+
+    assert isinstance(choices, MetadataChoices)
+    assert choices.cover == "page-drawing"
+    assert choices.back_cover == "none"
+    # Deterministic branches mutated the draft.
+    assert draft.title == "The Brave Owl"
+    assert draft.author == "Ece"
+    assert draft.cover_image == tmp_path / "page-01.png"
+    assert draft.cover_style == "full-bleed"
+    assert draft.back_cover_text == ""
+
+
+def test_collect_metadata_returns_ai_flags_when_ai_branches_chosen(tmp_path):
+    """When the user picks AI for cover and back-cover, the
+    orchestrator returns the branch tags but does NOT mutate the
+    cover or back-cover fields — the agent's first turn handles
+    those (drafting a prompt from story content is the judgment
+    part that warrants the LLM)."""
+    from src.metadata_prompts import collect_metadata
+
+    draft = _draft_with_pages(tmp_path, [("page-01.png", False)])
+
+    choices = collect_metadata(
+        draft,
+        _scripted([
+            "Yavru Dinozor",   # title
+            "Ece",              # author
+            "y", "1",           # series + volume → title becomes "Yavru Dinozor - 1"
+            "b",                # cover: ai
+            "c",                # back-cover: ai-draft
+        ]),
+        _console(),
+    )
+
+    assert choices.cover == "ai"
+    assert choices.back_cover == "ai-draft"
+    # Series+volume was applied.
+    assert draft.title == "Yavru Dinozor - 1"
+    # AI branches left cover and back-cover untouched.
+    assert draft.cover_image is None
+    assert draft.back_cover_text == ""
