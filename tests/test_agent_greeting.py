@@ -123,25 +123,42 @@ def test_greeting_still_asks_agent_to_read_draft_first():
     assert "read_draft" in lowered
 
 
-def test_greeting_echoes_preserve_child_voice_guard_for_back_cover():
-    """The back cover is child-authored (preserve-child-voice).
-    The greeting must forbid the agent from inventing / paraphrasing
-    the back-cover blurb."""
+def test_greeting_offers_three_back_cover_options():
+    """The back-cover step mirrors the cover step: three explicit
+    options — user writes it / AI drafts from story content / skip.
+    Before the 2026-04-24 update the greeting only allowed option (a)
+    + skip, forcing the user to type the blurb themselves even when
+    they asked the agent to draft one. The AI-draft branch must be
+    named so the agent doesn't default-refuse."""
     lowered = _AGENT_GREETING_HINT.lower()
 
     assert "back cover" in lowered or "back-cover" in lowered
+    # Three-options pattern matching the cover step.
+    assert "(a)" in lowered and "(b)" in lowered and "(c)" in lowered
+    # (b) must name the AI-generation path explicitly and ground it
+    # in the story's own page text (not generic theme clichés).
+    assert "ai" in lowered or "generate" in lowered
+    assert "page text" in lowered or "story's" in lowered or "story content" in lowered
 
-    # Guard against inventing or paraphrasing.
-    assert (
-        "do not invent" in lowered
-        or "don't invent" in lowered
-        or "do not paraphrase" in lowered
-        or "don't paraphrase" in lowered
-        or "verbatim" in lowered
-    )
-    # And "preserve-child-voice" named so the link to CLAUDE.md is
-    # unambiguous.
+
+def test_greeting_clarifies_preserve_child_voice_scope_for_back_cover():
+    """Preserve-child-voice applies to the book's INTERIOR (page
+    text) — the child's own words must never be rewritten. The
+    back-cover blurb is editor-facing metadata and the AI-draft
+    branch is a legitimate opt-in. The greeting must name both
+    halves so the agent doesn't either (i) refuse an AI-draft
+    request or (ii) take the scope clarification as permission to
+    paraphrase page text."""
+    lowered = _AGENT_GREETING_HINT.lower()
+    # Scope is still named so the link to CLAUDE.md stays unambiguous.
     assert "preserve-child-voice" in lowered
+    # And the clarification: page text / interior is the child's,
+    # NOT the back-cover blurb.
+    assert "interior" in lowered or "page text" in lowered
+    # The AI-draft branch on the back cover must accept the user's
+    # rewrite as the source of truth — "verbatim" must still appear
+    # somewhere in the back-cover section.
+    assert "verbatim" in lowered
 
 
 # ---------------------------------------------------------------------------
