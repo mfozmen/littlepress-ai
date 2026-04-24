@@ -48,18 +48,37 @@ def mask_text_regions(
     Coordinates follow PIL convention: ``(x0, y0)`` is the top-left
     inclusive and ``(x1, y1)`` is the bottom-right exclusive.
 
-    The input file is never written through — ``preserve-child-
-    voice`` extends to the original scan. If ``boxes`` is empty, the
-    output is a pixel-for-pixel copy of the input (re-encoded at the
-    same size and mode, but with no content change). Output path is
-    assumed to exist's parent directory; callers can't rely on this
+    The input file is never written through — preserve-child-voice
+    extends to the original scan. The function rejects an
+    ``output_path`` that resolves to the same file as ``image_path``
+    with ``ValueError`` (``Path.resolve`` normalises so the guard
+    catches relative/absolute pairs and Windows case-insensitive
+    aliases, not just byte-equal strings). The output path's parent
+    directory must already exist; callers can't rely on this
     function to create it.
+
+    Degenerate boxes (zero-area or inverted, ``x1 <= x0`` or
+    ``y1 <= y0``) are skipped silently — OCR engines occasionally
+    emit those for punctuation, noise, or single-pixel detections,
+    and there's nothing useful to mask in a zero-pixel region. If
+    ``boxes`` is empty (or every box is degenerate), the output is a
+    pixel-for-pixel copy of the input (re-encoded at the same size
+    and mode, but with no content change).
     """
+    if Path(image_path).resolve() == Path(output_path).resolve():
+        raise ValueError(
+            f"mask_text_regions refuses to write back to its own "
+            f"input ({image_path}) — preserve-child-voice rule. "
+            f"Pass a different output_path."
+        )
     with Image.open(image_path) as img:
         rgb = img.convert("RGB")
         if boxes:
             draw = ImageDraw.Draw(rgb)
             for (x0, y0, x1, y1) in boxes:
+                if x1 <= x0 or y1 <= y0:
+                    # Degenerate box — skip. See module docstring.
+                    continue
                 # PIL's rectangle draws the bottom-right edge
                 # inclusively when using ``fill``; the ``x1, y1``
                 # exclusive convention matches how OCR / bbox

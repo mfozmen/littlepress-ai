@@ -281,6 +281,101 @@ def test_mask_text_regions_multiple_separated_boxes(tmp_path):
             )
 
 
+def test_mask_text_regions_refuses_to_write_back_to_input(tmp_path):
+    """PR #73 review #1: ``mask_text_regions`` must NOT write to its
+    own input path. PIL holds a read-lock on the file inside the
+    ``with Image.open(...)`` context — on Windows ``save`` to the
+    same path raises ``PermissionError``; on Unix it would silently
+    overwrite the original scan, breaking the preserve-child-voice
+    invariant the function's docstring promises. The guard rejects
+    the call with ``ValueError`` before any file IO happens."""
+    import pytest
+
+    from src.drawing_extraction import mask_text_regions
+
+    fx = _build_samsung_notes_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="preserve-child-voice"):
+        mask_text_regions(fx.page_path, fx.text_boxes, fx.page_path)
+
+    # Input still untouched — guard fired before any write attempt.
+    # Re-open and check the text region is still inked.
+    with Image.open(fx.page_path) as img:
+        pixels = img.convert("RGB").load()
+        x0, y0, x1, y1 = fx.text_boxes[0]
+        dark_count = sum(
+            1
+            for x in range(x0, x1)
+            for y in range(y0, y1)
+            if sum(pixels[x, y]) < 3 * 200
+        )
+        assert dark_count > 5, "input scan was modified despite the guard"
+
+
+def test_mask_text_regions_refuses_relative_path_aliases_for_input(tmp_path):
+    """The guard uses ``Path.resolve()`` so relative/absolute pairs
+    pointing at the same file are also rejected (not just exact
+    string matches). Without this, a caller that passes one path as
+    relative and one as absolute would get past the byte-equal
+    check and hit the same PIL-lock / preserve-child-voice issue."""
+    import pytest
+
+    from src.drawing_extraction import mask_text_regions
+
+    fx = _build_samsung_notes_fixture(tmp_path)
+    # Build an absolute alias for the same file.
+    abs_alias = fx.page_path.resolve()
+    assert abs_alias == fx.page_path.resolve()
+
+    with pytest.raises(ValueError, match="preserve-child-voice"):
+        mask_text_regions(fx.page_path, fx.text_boxes, abs_alias)
+
+
+def test_mask_text_regions_skips_zero_area_boxes(tmp_path):
+    """PR #73 review #2: OCR engines sometimes emit zero-area boxes
+    for punctuation, noise, or single-pixel detections (``x0 == x1``
+    or ``y0 == y1``). The primitive must skip those silently —
+    PIL's rectangle raises if ``x1 - 1 < x0`` after the inclusive-
+    edge adjustment. No exception, no spurious modification."""
+    from src.drawing_extraction import mask_text_regions
+
+    fx = _build_samsung_notes_fixture(tmp_path)
+    output = tmp_path / "cleaned.png"
+
+    degenerate = [
+        (100, 100, 100, 200),  # zero width
+        (100, 100, 200, 100),  # zero height
+        (100, 100, 100, 100),  # both zero (point)
+    ]
+
+    # Should not raise.
+    mask_text_regions(fx.page_path, degenerate, output)
+    assert output.is_file()
+
+    # And degenerate boxes don't accidentally bleed into adjacent
+    # pixels — output is byte-identical to a no-mask copy.
+    plain_copy = tmp_path / "plain.png"
+    mask_text_regions(fx.page_path, [], plain_copy)
+    with Image.open(output) as a, Image.open(plain_copy) as b:
+        assert a.convert("RGB").tobytes() == b.convert("RGB").tobytes()
+
+
+def test_mask_text_regions_skips_inverted_boxes(tmp_path):
+    """Defensive: an inverted box (``x1 < x0`` or ``y1 < y0``) is
+    nonsensical input but a sloppy OCR could produce one after a
+    coordinate swap. Skip — same shape as the zero-area path —
+    rather than handing nonsense to PIL."""
+    from src.drawing_extraction import mask_text_regions
+
+    fx = _build_samsung_notes_fixture(tmp_path)
+    output = tmp_path / "cleaned.png"
+    inverted = [(200, 200, 100, 100)]  # x1 < x0 AND y1 < y0
+
+    # Should not raise.
+    mask_text_regions(fx.page_path, inverted, output)
+    assert output.is_file()
+
+
 def test_mask_text_regions_preserves_image_mode(tmp_path):
     """The cleaned image must round-trip through PIL as a normal
     RGB PNG — same mode, same size. Anything weirder (mode change,
