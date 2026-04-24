@@ -240,12 +240,42 @@ def test_greeting_no_longer_has_metadata_review_checkpoint():
 
 def test_greeting_mentions_review_turn_tools_explicitly():
     """The new flow depends on the agent knowing to use
-    apply_text_correction / restore_page / hide_page during review."""
+    apply_text_correction / restore_page / hide_page / choose_layout
+    during review. choose_layout joined the set after the Yavru
+    Dinozor v3 MIXED-default fix — users need a way to opt the
+    drawing back in on pages where ingestion defaulted to text-only."""
     from src.repl import _AGENT_GREETING_HINT
 
     g = _AGENT_GREETING_HINT
-    for tool in ("apply_text_correction", "restore_page", "hide_page"):
+    for tool in (
+        "apply_text_correction",
+        "restore_page",
+        "hide_page",
+        "choose_layout",
+    ):
         assert tool in g, f"review-turn tool {tool!r} missing from greeting"
+
+
+def test_greeting_surfaces_show_drawing_review_command():
+    """Regression for the Yavru Dinozor v3 MIXED fix: the greeting
+    must tell the agent that when the user asks to 'show the drawing
+    on page N' (or layout-adjustment equivalents), the right call
+    is choose_layout, not apply_text_correction / restore_page /
+    hide_page. Without this hint the agent might refuse or call the
+    wrong tool, leaving the user stuck with text-only pages they
+    want to see the drawing on."""
+    from src.repl import _AGENT_GREETING_HINT
+
+    lowered = _AGENT_GREETING_HINT.lower()
+    # The review-turn bullet must name choose_layout + at least one
+    # natural-language trigger the user would type.
+    assert "choose_layout" in lowered
+    assert (
+        "show drawing" in lowered
+        or "show the drawing" in lowered
+        or "layout image-top" in lowered
+        or "show the picture" in lowered
+    )
 
 
 def test_greeting_no_longer_references_old_skip_page_tool():
