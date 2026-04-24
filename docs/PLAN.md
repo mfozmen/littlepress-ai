@@ -51,6 +51,8 @@ All five PRs from the original plan merged:
 
 Items below came out of the first real end-to-end test (Yavru Dinozor). Listed roughly in "most visible to the user" order.
 
+- **Ctrl+C should exit the app.** Reported 2026-04-25 during the post-SHA-rewrite review session. Current behaviour (``src/repl.py::_read_loop``): ``KeyboardInterrupt`` clears the current line and re-prompts; exit requires ``Ctrl+D`` / ``/exit``. The existing comment frames this as "same feel as Claude Code / most shells," but the user's mental model is the standard "Ctrl+C exits the app" shape and the current behaviour trapped them. Fix options: (a) make Ctrl+C exit immediately on an empty prompt line, use "clear the line" only when mid-input (Python-REPL convention); (b) two-strike shape (first Ctrl+C clears line + prints a hint "Ctrl+C again to exit", second exits within N seconds); (c) single-press immediate exit, drop the line-clear behaviour entirely. (c) is the most intuitive for a task-oriented CLI like Littlepress where there's rarely a half-typed line worth preserving. Needs a regression test in ``tests/test_repl.py`` that simulates ``KeyboardInterrupt`` mid-session and asserts the run returns 0.
+
 - **Continue the "AI-only-for-judgment" refactor.** Sub-projects 1 and 2 shipped (see Shipped / `feat/deterministic-ingestion` and `feat/deterministic-metadata-collection`). Remaining:
   - **Sub-project 3 — (optional) Review-turn polish.** Possibly route review corrections through slash commands as well so the LLM's NL parsing is an explicit opt-in. Out of scope unless a real user test shows the free-form review is still too loose.
 
