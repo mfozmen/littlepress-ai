@@ -144,6 +144,17 @@ def test_greeting_offers_three_back_cover_options():
     # blank-line terminator before the next section ("ask each of
     # these as its own one-line question").
     assert "back-cover blurb" in lowered, "back-cover bullet missing entirely"
+    # Explicit delimiter guard — if a future greeting rewrite moves
+    # or rephrases the end-of-section anchor, this assertion fires
+    # loudly BEFORE the slice can silently grow back over the cover
+    # bullet and re-admit the vacuous-pass failure mode (PR #66
+    # round-2 review).
+    assert "ask each of these" in lowered, (
+        "greeting's end-of-section anchor 'ask each of these' has "
+        "moved or been rephrased — update the back-cover test slice "
+        "delimiter to match, or the (a)/(b)/(c) + AI checks below "
+        "will start passing vacuously from the cover bullet"
+    )
     bc = lowered.split("back-cover blurb", 1)[1].split("ask each of these", 1)[0]
 
     # Three-options pattern matching the cover step, but specifically

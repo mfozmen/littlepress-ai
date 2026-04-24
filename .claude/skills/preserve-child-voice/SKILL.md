@@ -1,6 +1,6 @@
 ---
 name: preserve-child-voice
-description: Guardrail for any edit touching the child's original text (OCR output, book.json page text, cover/back-cover text, transcribed handwriting). Invoke BEFORE adding a tool that touches child content, editing OCR prompts, or writing any code that writes to page.text. The goal is that the child feels like a real author, so their voice must be preserved.
+description: Guardrail for any edit touching text the child authored — OCR output, page text, invented spellings / names / onomatopoeia, and cover or back-cover text the user has typed verbatim on the child's behalf. Out of scope — an AI-drafted back-cover blurb the user explicitly opts into is editor-facing metadata. Invoke BEFORE adding a tool that touches child content, editing OCR prompts, or writing any code that writes to page.text. The goal is that the child feels like a real author, so their voice must be preserved.
 ---
 
 # Preserve the child's voice
