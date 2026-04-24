@@ -193,3 +193,193 @@ def test_collect_series_volume_reprompts_on_non_integer(tmp_path):
     collect_series(draft, _scripted(["y", "three", "", "3"]), _console())
 
     assert draft.title == "A - 3"
+
+
+# ---------------------------------------------------------------------------
+# collect_cover_choice
+# ---------------------------------------------------------------------------
+# The cover prompt is a 3-way menu: (a) use an existing page drawing,
+# (b) generate with AI (hands off to the agent's first turn — needs
+# LLM judgment to draft the prompt from the story), (c) poster style
+# (no image, typography only).
+#
+# Deterministic branches mutate the draft directly. The AI branch is
+# the single judgment-requiring path and returns the ``"ai"`` tag so
+# the caller knows to leave the cover fields unset for the agent to
+# fill in.
+
+
+def _draft_with_pages(tmp_path: Path, pages: list[tuple[str | None, bool]]) -> Draft:
+    """Build a Draft whose pages carry (image_path_or_None, hidden)."""
+    from src.draft import DraftPage
+
+    draft_pages = [
+        DraftPage(
+            text="",
+            image=(tmp_path / img) if img else None,
+            hidden=hidden,
+        )
+        for img, hidden in pages
+    ]
+    return Draft(source_pdf=tmp_path / "x.pdf", pages=draft_pages)
+
+
+def test_collect_cover_choice_poster_sets_cover_style_and_clears_image(tmp_path):
+    from src.metadata_prompts import collect_cover_choice
+
+    draft = _draft_with_pages(tmp_path, [("page-01.png", False)])
+    draft.cover_image = tmp_path / "stale.png"  # stale default to prove override
+    draft.cover_style = "full-bleed"
+
+    result = collect_cover_choice(draft, _scripted(["c"]), _console())
+
+    assert result == "poster"
+    assert draft.cover_image is None
+    assert draft.cover_style == "poster"
+
+
+def test_collect_cover_choice_page_drawing_picks_first_available_drawing(tmp_path):
+    """Option (a) is the default fast path: use the first page drawing
+    still attached to the draft. Ingestion may have cleared text-only
+    pages' images (no drawing left to use) and hidden blank pages, so
+    we must scan past those."""
+    from src.metadata_prompts import collect_cover_choice
+
+    draft = _draft_with_pages(
+        tmp_path,
+        [
+            (None, False),              # text-only page (image cleared)
+            (None, True),                # blank hidden page
+            ("page-03.png", False),     # first real drawing — pick this
+            ("page-04.png", False),
+        ],
+    )
+
+    result = collect_cover_choice(draft, _scripted(["a"]), _console())
+
+    assert result == "page-drawing"
+    assert draft.cover_image == tmp_path / "page-03.png"
+    assert draft.cover_style == "full-bleed"
+
+
+def test_collect_cover_choice_page_drawing_falls_back_to_poster_when_no_drawing(tmp_path):
+    """Samsung Notes exports can be 100% text pages. Option (a) has
+    nothing to reuse in that case — fall back to poster rather than
+    silently picking a hidden or text-only page."""
+    from src.metadata_prompts import collect_cover_choice
+
+    draft = _draft_with_pages(
+        tmp_path,
+        [(None, False), (None, True), (None, False)],
+    )
+
+    result = collect_cover_choice(draft, _scripted(["a"]), _console())
+
+    assert result == "poster"
+    assert draft.cover_image is None
+    assert draft.cover_style == "poster"
+
+
+def test_collect_cover_choice_ai_leaves_draft_untouched_for_agent(tmp_path):
+    """Option (b) is the only judgment-requiring branch: the agent
+    needs to draft a cover prompt from the story content, confirm
+    with the user, and call generate_cover_illustration. The
+    deterministic helper just records the intent by returning
+    ``"ai"`` — it MUST NOT touch ``draft.cover_image`` or
+    ``draft.cover_style``."""
+    from src.metadata_prompts import collect_cover_choice
+
+    draft = _draft_with_pages(tmp_path, [("page-01.png", False)])
+    # Caller sets defaults before calling; collect_cover_choice must
+    # leave them alone on the AI branch.
+    draft.cover_image = None
+    draft.cover_style = "full-bleed"
+
+    result = collect_cover_choice(draft, _scripted(["b"]), _console())
+
+    assert result == "ai"
+    assert draft.cover_image is None
+    assert draft.cover_style == "full-bleed"
+
+
+def test_collect_cover_choice_reprompts_on_unclear_answer(tmp_path):
+    from src.metadata_prompts import collect_cover_choice
+
+    draft = _draft_with_pages(tmp_path, [("page-01.png", False)])
+
+    result = collect_cover_choice(draft, _scripted(["d", "huh", "c"]), _console())
+
+    assert result == "poster"
+
+
+# ---------------------------------------------------------------------------
+# collect_back_cover
+# ---------------------------------------------------------------------------
+
+
+def test_collect_back_cover_none_leaves_text_empty(tmp_path):
+    from src.metadata_prompts import collect_back_cover
+
+    draft = _empty_draft(tmp_path)
+    draft.back_cover_text = "stale"  # stale default; option (a) must clear
+
+    result = collect_back_cover(draft, _scripted(["a"]), _console())
+
+    assert result == "none"
+    assert draft.back_cover_text == ""
+
+
+def test_collect_back_cover_self_written_writes_user_string_verbatim(tmp_path):
+    """The user's blurb is written verbatim (preserve-child-voice —
+    they're typing on the child's behalf). Outer whitespace stripped;
+    internal preserved."""
+    from src.metadata_prompts import collect_back_cover
+
+    draft = _empty_draft(tmp_path)
+    result = collect_back_cover(
+        draft,
+        _scripted(["b", "  Yavru dinozor büyümeyi öğreniyor.  "]),
+        _console(),
+    )
+
+    assert result == "self-written"
+    assert draft.back_cover_text == "Yavru dinozor büyümeyi öğreniyor."
+
+
+def test_collect_back_cover_ai_leaves_draft_untouched_for_agent(tmp_path):
+    """Option (c) is the judgment path — agent drafts a one-line
+    blurb grounded on the story's actual page text, confirms, writes
+    it via set_metadata. Deterministic helper records intent only."""
+    from src.metadata_prompts import collect_back_cover
+
+    draft = _empty_draft(tmp_path)
+    result = collect_back_cover(draft, _scripted(["c"]), _console())
+
+    assert result == "ai-draft"
+    assert draft.back_cover_text == ""
+
+
+def test_collect_back_cover_self_written_reprompts_on_empty_blurb(tmp_path):
+    """If the user picks (b) but submits empty text, they probably
+    meant (a). Re-prompt the blurb until they type something or fall
+    out via re-pick."""
+    from src.metadata_prompts import collect_back_cover
+
+    draft = _empty_draft(tmp_path)
+    result = collect_back_cover(
+        draft,
+        _scripted(["b", "", "  ", "A one-line blurb."]),
+        _console(),
+    )
+
+    assert result == "self-written"
+    assert draft.back_cover_text == "A one-line blurb."
+
+
+def test_collect_back_cover_reprompts_on_unclear_answer(tmp_path):
+    from src.metadata_prompts import collect_back_cover
+
+    draft = _empty_draft(tmp_path)
+    result = collect_back_cover(draft, _scripted(["x", "a"]), _console())
+
+    assert result == "none"

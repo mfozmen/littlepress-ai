@@ -93,3 +93,92 @@ def _prompt_volume(read_line: ReadLine, console: Console) -> int:
             continue
         if n > 0:
             return n
+
+
+_COVER_MENU = (
+    "[bold]Cover?[/bold]\n"
+    "  (a) use a page drawing from the story\n"
+    "  (b) generate with AI\n"
+    "  (c) poster (typography only, no image)"
+)
+
+
+def collect_cover_choice(
+    draft: Draft, read_line: ReadLine, console: Console
+) -> str:
+    """3-way menu: ``"page-drawing"``, ``"ai"``, or ``"poster"``.
+
+    Deterministic branches mutate the draft directly. The AI branch
+    leaves the draft untouched and returns the ``"ai"`` tag so the
+    caller can hand off to the agent's first turn (drafting a prompt
+    from the story content is the judgment part that warrants the
+    LLM).
+
+    The ``"page-drawing"`` branch auto-picks the first page with an
+    attached drawing that isn't hidden. If no such page exists
+    (e.g. a 100%-text Samsung Notes export) it silently falls back
+    to poster — the menu stays simple and the user can change the
+    cover via slash commands post-render if they want something
+    different.
+    """
+    while True:
+        console.print(_COVER_MENU)
+        answer = read_line().strip().lower()
+        if answer == "a":
+            return _apply_page_drawing_cover(draft)
+        if answer == "b":
+            return "ai"
+        if answer == "c":
+            draft.cover_image = None
+            draft.cover_style = "poster"
+            return "poster"
+
+
+def _apply_page_drawing_cover(draft: Draft) -> str:
+    first_drawing = next(
+        (p.image for p in draft.pages if not p.hidden and p.image is not None),
+        None,
+    )
+    if first_drawing is None:
+        draft.cover_image = None
+        draft.cover_style = "poster"
+        return "poster"
+    draft.cover_image = first_drawing
+    draft.cover_style = "full-bleed"
+    return "page-drawing"
+
+
+_BACK_COVER_MENU = (
+    "[bold]Back-cover blurb?[/bold]\n"
+    "  (a) none\n"
+    "  (b) I'll write it\n"
+    "  (c) draft with AI"
+)
+
+
+def collect_back_cover(
+    draft: Draft, read_line: ReadLine, console: Console
+) -> str:
+    """3-way menu: ``"none"``, ``"self-written"``, or ``"ai-draft"``.
+
+    ``"none"`` clears ``draft.back_cover_text``. ``"self-written"``
+    prompts for a blurb and writes it verbatim (preserve-child-voice
+    applies — the user is typing on the child's behalf). ``"ai-draft"``
+    leaves the draft untouched; the caller hands off to the agent's
+    first turn so the LLM can draft a one-line blurb grounded on the
+    story's actual page text."""
+    while True:
+        console.print(_BACK_COVER_MENU)
+        answer = read_line().strip().lower()
+        if answer == "a":
+            draft.back_cover_text = ""
+            return "none"
+        if answer == "b":
+            draft.back_cover_text = _prompt_nonempty(
+                "[bold]Type the back-cover blurb (one or two sentences):[/bold]",
+                read_line,
+                console,
+            )
+            return "self-written"
+        if answer == "c":
+            return "ai-draft"
