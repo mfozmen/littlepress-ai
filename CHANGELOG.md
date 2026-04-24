@@ -1,12 +1,306 @@
 # CHANGELOG
 
 
+## v1.17.0 (2026-04-24)
+
+### Chores
+
+- Add .mailmap canonicalising historical work-email identities
+  ([#70](https://github.com/mfozmen/littlepress-ai/pull/70),
+  [`9eeb642`](https://github.com/mfozmen/littlepress-ai/commit/9eeb64224e72c5b1561867a8b6dc2be5e5e213ff))
+
+The maintainer's ``~/.gitconfig`` used to carry a work email (``mehmet.fahri@mayadem.com``) and
+  stamped most of ``main``'s early history with it. ``mehmetfahriozmen@gmail.com`` is the canonical
+  identity for this open-source project going forward.
+
+``.mailmap`` is a read-time display rewrite — ``git log``, ``git shortlog``, and GitHub's
+  commit-list UI all apply it, but no SHAs change. Chose this over a ``git filter-repo`` rewrite
+  (documented alongside in docs/PLAN.md before this commit) because the non-destructive path is
+  honest and has zero blast radius for clones, forks, and any open PRs.
+
+Before: ``git shortlog -s -e -n`` showed the maintainer twice —
+
+once under work email (57 commits) and once under personal email (55). After this commit, all 112
+  are collapsed under the personal identity:
+
+112 Mehmet Fahri Özmen <mehmetfahriozmen@gmail.com> 69 Mehmet Fahri Özmen
+  <39158545+mfozmen@users.noreply.github.com> 56 semantic-release <semantic-release>
+
+The GitHub-noreply identity (squash-merge commits authored through GitHub's merge UI) is
+  deliberately left unmapped — it's how GitHub identifies the user on their platform, and keeping it
+  preserves the "came in via GitHub merge UI" signal in the history. ``semantic-release`` bot
+  commits are also unmapped (not a human identity).
+
+Replaces the "Rewrite historical commit author email on main" Next-up item in docs/PLAN.md with a
+  Shipped-table row.
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- Remove .mailmap — now redundant after SHA-level email rewrite
+  ([`c7974ef`](https://github.com/mfozmen/littlepress-ai/commit/c7974efc8b4c09dd29393975195031887be79447))
+
+``.mailmap`` was added earlier as a non-destructive canonicalisation of the maintainer's historical
+  work email (``mehmet.fahri@mayadem.com`` → ``mehmetfahriozmen@gmail.com``). After the user decided
+  they'd rather have the email rewritten at the SHA level, ``git filter-repo --mailmap .mailmap``
+  was run to rewrite 243 commits so every user-authored commit now carries the personal email
+  directly. The mailmap file has nothing left to canonicalise — no commits in the repo still
+  reference the work email — so it can be removed.
+
+Before this commit: 115 Mehmet Fahri Özmen <mehmetfahriozmen@gmail.com> 71 Mehmet Fahri Özmen
+  <39158545+mfozmen@users.noreply.github.com> 57 semantic-release <semantic-release>
+
+(And zero commits with the old work email — already collapsed into the personal identity at the SHA
+  level.)
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- **plan**: Add Ctrl+C-exits bug (reported during post-rewrite review)
+  ([`de50057`](https://github.com/mfozmen/littlepress-ai/commit/de5005770d7ca3d48ceee56a032ffc91b0a220da))
+
+User hit this during the 2026-04-25 review session: pressing Ctrl+C in the REPL doesn't exit the
+  app, it clears the line and re-prompts, and Ctrl+D / /exit are the only working exit paths. The
+  current ``src/repl.py::_read_loop`` comment frames that as "same feel as Claude Code / most
+  shells", but the user expected the standard "Ctrl+C exits the app" shape, and the current
+  behaviour trapped them in the session.
+
+Recorded in Next up with three fix options:
+
+(a) Ctrl+C exits on empty line, clears line mid-input (Python REPL convention), (b) two-strike shape
+  ("Ctrl+C again to exit"), (c) single-press unconditional exit.
+
+Noted (c) as the likely best fit for a task-oriented CLI — there's rarely a half-typed line worth
+  preserving. Needs a regression test in ``tests/test_repl.py`` that simulates ``KeyboardInterrupt``
+  mid-session and asserts exit code 0.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- **plan**: Add warmth/localisation regression from Sub-project 2
+  ([`782e609`](https://github.com/mfozmen/littlepress-ai/commit/782e60925b9fec8785401ccae4072102dd00cec7))
+
+Reported 2026-04-25 during the post-SHA-rewrite review session right after the Ctrl+C bug: the five
+  deterministic metadata prompts (``Title?`` / ``Author?`` / ``Is this book part of a series?`` /
+  ``Cover?`` / ``Back-cover blurb?``) print as single-word English labels regardless of the user's
+  language. The agent-driven flow that Sub-project 2 replaced used to match the user's language
+  automatically; the refactor dropped that warmth along with the LLM round trips.
+
+User's framing: *"sanırım ai sorsa soruları daha iyiydi."* The concern isn't with determinism per se
+  — it's that the refactor conflated "don't burn LLM tokens on data collection" with "terse
+  English-only labels are fine." These two are separable.
+
+Recorded in Next up with three fix options:
+
+(a) Full localisation: auto-detect user language from the first reply and re-prompt subsequent
+  questions in it. (b) Config-driven: ``--lang`` CLI flag + ``/lang`` slash command. (c) Hybrid:
+  ship English + Turkish to start (the only two languages the maintainer uses in practice),
+  auto-detect from the first reply, expand later.
+
+Flagged (c) as the smallest real improvement that gets the warmth back without committing to a full
+  i18n system yet. Phrasing should be full sentences, not single-word labels, and cover/back-cover
+  menus need descriptive option text not bare ``(a)/(b)/(c)`` letters.
+
+Also added a feedback memory ``determinism_is_not_english_only`` to capture the distinction so
+  future deterministic-replacement work doesn't repeat this.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- **plan**: Record SHA-level email rewrite + PR #70/#72 row updates
+  ([`d3e0a22`](https://github.com/mfozmen/littlepress-ai/commit/d3e0a22f35fcfc4a236694329d885946421b06f6))
+
+Three PLAN updates:
+
+1. PR #70 row updated from ``TBD`` to ``#70``, now marked as "first attempt, superseded by SHA-level
+  rewrite below" — the maintainer preferred a clean history over the mailmap display-layer
+  workaround.
+
+2. PR #72 row added (Sonar S3776 cognitive-complexity fix on ``src/ingestion.py``).
+
+3. New "out-of-band" row documenting the SHA-level email rewrite: ``git filter-repo --mailmap
+  .mailmap`` against 243 commits collapsed the 57 work-email-stamped commits onto the canonical
+  personal email. Tags v0.1.0..v1.16.0 force-pushed to their rewritten SHAs. Blast radius was zero
+  (no active forks, no other developers, no open PRs at rewrite time). GitHub-noreply squash-merge
+  identity and semantic-release bot identity deliberately left unmapped.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- **plan**: Three Yavru Dinozor findings — layout overwrite, baked pixels, colophon
+  ([`4195d02`](https://github.com/mfozmen/littlepress-ai/commit/4195d02270135b6ed436570b1a6a8656ecbdf60a))
+
+Three related bugs reported during the 2026-04-25 live render of ``yavru_dinozor_-_1``:
+
+1. **propose_layouts undoes PR #67's MIXED-default text-only.** draft.json shows pages 1–4 with
+  ``layout=image-top`` / ``-bottom`` / ``-full`` and image still attached — the exact shape PR #67
+  was meant to prevent. Ingestion correctly sets text-only on MIXED, but the agent proactively calls
+  ``propose_layouts`` afterwards; that tool sees image-attached pages and promotes them to image-*
+  layouts. Fix: treat ``layout=text-only AND image is not None`` as a protected shape in
+  ``propose_layouts`` (unique signature of a MIXED default, since non-MIXED text-only has no image).
+
+2. **Baked-pixel illustrations can't be extracted.** User's deeper complaint about Samsung Notes
+  exports: text and drawing arrive as one raster. MIXED text-only hides the image (loses drawing);
+  image-top shows it (text prints twice). Architectural, not a bug. Four fix options documented: (a)
+  OCR-box masking + local inpainting, (b) OpenAI gpt-image-1 edit endpoint, (c) workflow change
+  (draw + text separate), (d) offer ``generate_page_illustration`` as replacement drawing. (d) is
+  the near-term lever; (a) a follow-up experiment.
+
+3. **Colophon pages aren't recognised as metadata.** Page 5 read "YAZAR:POYRAZ RESİMLEYEN:POYRAZ"
+  but was rendered as a story page instead of being routed to cover metadata and hidden. User's
+  framing: *"kapata olmalıydı bu yazılar ve poyraz özmen olarak yazmalıydı. yapay zeka bunları ayırt
+  etmeli."* Fix shape: post-OCR agent pass that classifies transcribed pages as story vs metadata
+  (colophon / credits / dedication) and auto-hides metadata pages while merging any names found with
+  the user-typed cover fields (prefer the more complete form).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- **extraction**: Baseline drawing/text separation primitive
+  ([#73](https://github.com/mfozmen/littlepress-ai/pull/73),
+  [`4b932f4`](https://github.com/mfozmen/littlepress-ai/commit/4b932f430d5542a2c1d63b442484f2798d8ab2e4))
+
+* feat(extraction): baseline drawing/text separation primitive
+
+First slice of the baked-pixel-extraction plan entry (reported in the 2026-04-25 Yavru Dinozor
+  render: Samsung Notes pages carry text and drawing on the same pixel canvas, there's no way today
+  to surface the drawing without also duplicating the text).
+
+New ``src/drawing_extraction.py`` with ``mask_text_regions(image, boxes, output)``:
+
+- Takes a raster page + OCR-produced bounding boxes + an output path. - Paints white rectangles over
+  each box and writes the cleaned copy. - Input file is never written through — preserve-child-voice
+  extends to the original scan. - Empty-boxes path is a pixel-for-pixel copy (no accidental work on
+  the cleaned file).
+
+Scope kept narrow: this is the primitive, not the pipeline glue. The OCR step that produces the
+  bounding boxes, the ingestion-time decision about when to apply it, and the overlap case
+  (text-over-drawing pixels, where a white fill damages the drawing) are all out of scope. Overlap
+  handling is a follow-up inpainting pass — see the PLAN entry's options (a) OpenCV ``cv2.inpaint``
+  and (b) gpt-image-1 edit endpoint.
+
+Tests (8, all passing):
+
+- Fixture construction is deterministic — a PIL helper builds a Samsung-Notes-shaped raster in
+  ``tmp_path`` with Turkish text at known positions in the top half and a child-style tree (circle +
+  rectangle trunk) in the bottom half, no overlap. No binary blobs committed; the helper itself
+  documents what a "Samsung Notes page" looks like to the pipeline. Reproduces the user's "samsung
+  notes'tan alınca sorun oluyorsa o şekilde örnek oluştur" ask at the synthetic-but-realistic level.
+  - Two fixture-sanity tests guard against the helper regressing (text boxes must contain dark
+  pixels; drawing region must contain dark pixels) — without these the contract tests could pass
+  vacuously. - Six contract tests pin the primitive's behaviour: writes to the supplied output path
+  (not in-place), clears every text box to white, leaves the drawing region pixel-for-pixel
+  untouched, empty-boxes is a round-trip copy, multiple separated boxes all get masked, output
+  round-trips as a normal RGB PNG at the same size.
+
+Full suite: 693 passing (+8).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(extraction): address PR #73 review — guard same-path write, skip degenerate boxes
+
+Three of four review findings addressed.
+
+1. (score 100, above threshold) ``mask_text_regions`` did not guard ``output_path == image_path``.
+  PIL keeps a read-lock on the source inside the ``with Image.open(...)`` context — on Windows
+  ``save`` to the same path raises PermissionError; on Unix it silently overwrites the original
+  scan, breaking the preserve-child-voice invariant the docstring promises. Added a guard at the
+  top: ``if Path(input).resolve() == Path(output).resolve(): raise ValueError(...)``. ``resolve()``
+  normalises so the guard catches relative/absolute pairs and Windows case-insensitive aliases, not
+  just byte-equal strings. Two regression tests pin the contract: same-path raises + leaves the
+  input untouched; relative/absolute alias also raises.
+
+2. (score 75) Zero-area OCR boxes triggered ``ValueError`` from PIL. ``draw.rectangle([x0, y0, x1-1,
+  y1-1])`` raises if ``x1 == x0`` (zero width) or ``y1 == y0`` (zero height) since the
+  inclusive-edge adjustment yields ``x1-1 < x0``. OCR engines emit zero-area boxes legitimately for
+  punctuation, noise, and single-pixel detections, so the primitive must skip them rather than
+  error. Added a ``if x1 <= x0 or y1 <= y0: continue`` guard inside the loop. Two regression tests
+  pin: zero-area boxes (width=0, height=0, both=0) skip silently and produce a no-mask-copy output;
+  inverted boxes (x1 < x0 AND y1 < y0) follow the same path.
+
+3. (score 50) Docstring typo: "Output path is assumed to exist's parent directory" → ungrammatical.
+  Rewritten to "Output path's parent directory must already exist".
+
+Finding #4 (score 25, Turkish quote in commit body) not addressed. The phrase was a verbatim user
+  ask quoted as design context, the same shape past PRs have used (PR #66 had ``"sen yaz"``).
+  Reviewer's own note acknowledges commit messages are borderline per CLAUDE.md. Borderline + small
+  + below threshold — leaving as-is.
+
+Full suite: 697 passing (+4 new).
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- **ingestion**: Reduce cognitive complexity of ingest_image_only_pages
+  ([#72](https://github.com/mfozmen/littlepress-ai/pull/72),
+  [`721bb7e`](https://github.com/mfozmen/littlepress-ai/commit/721bb7e165154b1591a6e835427d3798cd8f3522))
+
+* refactor(ingestion): reduce cognitive complexity of ingest_image_only_pages (Sonar S3776)
+
+Sonar flagged ``ingest_image_only_pages`` with cognitive complexity 17 (cap is 15; rule
+  python:S3776, severity CRITICAL). The function was doing five things inline: provider guard,
+  per-page skip classification, vision call + failure handling, sentinel application, and outcome
+  classification — all in the same body with try/except branches nested inside the loop.
+
+Extracted four named helpers, each with a single clear job:
+
+* ``_should_skip_page``: idempotent-skip decision (hidden, no image, or already transcribed). *
+  ``_ocr_one_page``: orchestrates vision call → sentinel apply → report classification for ONE page.
+  Late-imports the agent tool helpers so a future import back from ``agent_tools`` to ``ingestion``
+  doesn't cycle. * ``_vision_reply_or_record_error``: the vision call + failure branch collapsed to
+  ``reply | None``. Both shapes of failure (``(reply, error)`` tuple and raised exceptions) route to
+  the same ``_record_failure`` path. * ``_classify_outcome``: post-mutation page-state → report
+  bucket dispatch.
+
+``ingest_image_only_pages`` itself is now a three-line loop (skip → process → collect) with the
+  NullProvider guard up top.
+
+No behaviour change. Full suite: 684 passing.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(ingestion): address PR #71 review — exception-branch test + narrowed import
+
+Three findings from the round-1 review. Two addressed here in this commit; #1 (branch-name mismatch)
+  handled separately by renaming the branch.
+
+Finding #3 (score 75, Quality Gate MERGE BLOCKER). Sonar flagged 70.4% coverage on new code, below
+  the 80% gate. The exception branch of ``_vision_reply_or_record_error`` (when
+  ``call_vision_for_transcription`` raises any Exception) was not reachable from the existing suite
+  — every scripted LLM stub returns canned strings, nothing raises. New test
+  ``test_ingest_records_error_when_vision_call_raises_exception`` plugs in a ``_RaisingLLM`` stub
+  whose ``chat`` raises ``RuntimeError`` and pins the contract: error recorded in ``report.errors``,
+  page left untouched, no false success-bucket classification. Closes the TDD gap + the Quality Gate
+  concern.
+
+Finding #2 (score 75). ``_ocr_one_page`` line 79 imported both ``call_vision_for_transcription`` and
+  ``apply_sentinel_result`` but only uses the latter — ``_vision_reply_or_record_error`` re-imports
+  the vision helper independently. Narrowed the import to just ``apply_sentinel_result``; comment
+  now names the re-import contract so a future reader knows why both sites pay the import cost.
+
+Finding #1 (score 100) is about branch name ``chore/ingestion-cognitive-complexity`` not matching
+  the commit type ``refactor(ingestion):…`` per CLAUDE.md's branch-naming rule. Handled via rename
+  ceremony in the next push.
+
+Full suite: 685 passing (+1).
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.16.0 (2026-04-24)
+
+### Chores
+
+- **release**: 1.16.0 [skip ci]
+  ([`1209410`](https://github.com/mfozmen/littlepress-ai/commit/1209410313ae699f284a594b2471e3f92afbd14e))
 
 ### Documentation
 
 - **plan**: Track historical commit-email rewrite on main
-  ([`e4c31d6`](https://github.com/mfozmen/littlepress-ai/commit/e4c31d67c61dcb82e95fe3f96692ed47bc75190e))
+  ([`5fdf4b0`](https://github.com/mfozmen/littlepress-ai/commit/5fdf4b0b53c0b19567d9b4fbe955431f121866d8))
 
 The maintainer's ``~/.gitconfig`` used to carry a work email (``mehmet.fahri@mayadem.com``) and most
   of ``main``'s history is stamped with it; the personal email (``mehmetfahriozmen@gmail.com``) is
@@ -35,7 +329,7 @@ Defer the pick until we're ready to spend the maintenance window; the mailmap op
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **plan**: Trim AI back-cover blurb item (shipped in #66)
-  ([`6759898`](https://github.com/mfozmen/littlepress-ai/commit/67598989d719c3525d27fee2cf8be3fa8fd2714e))
+  ([`268a8dc`](https://github.com/mfozmen/littlepress-ai/commit/268a8dc6165c927624cd61da7964499875fe453b))
 
 The opt-in AI back-cover blurb generation item sat at the top of Next up with a 2026-04-24 date, but
   PR #66 (feat/ai-back-cover-blurb) shipped the full opt-in flow: the REPL asks for the blurb with
@@ -51,7 +345,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **metadata**: Deterministic title/author/series/cover/back-cover prompts
   ([#69](https://github.com/mfozmen/littlepress-ai/pull/69),
-  [`d10aab7`](https://github.com/mfozmen/littlepress-ai/commit/d10aab7f2fb9ffc854fd71bc61121aaef6169ea1))
+  [`e2af51d`](https://github.com/mfozmen/littlepress-ai/commit/e2af51d1684f0f190da49b9890688dffa592b521))
 
 * feat(metadata): pure-function helpers for title / author / series prompts
 
@@ -283,13 +577,13 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.15.0 [skip ci]
-  ([`65a204c`](https://github.com/mfozmen/littlepress-ai/commit/65a204cf70a9610fcea2144b41bad0059514c05b))
+  ([`1e63828`](https://github.com/mfozmen/littlepress-ai/commit/1e638284be360c4487fa87ddbde150c60f5ebee5))
 
 ### Documentation
 
 - **plan**: Move MIXED double-print fix to Shipped
   ([#67](https://github.com/mfozmen/littlepress-ai/pull/67),
-  [`406aa10`](https://github.com/mfozmen/littlepress-ai/commit/406aa100ce524ade1e5cef48e01263184c1abf3b))
+  [`e13978c`](https://github.com/mfozmen/littlepress-ai/commit/e13978ca0293a5957abf4c294ca7276c84973998))
 
 PR #67 shipped both halves of the fix surfaced in the v3 Samsung-Notes session — the tightened
   vision prompt (option A from the design note) and the text-only default (option B). The "next up"
@@ -304,7 +598,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **imposition**: Real-book pagination blanks
   ([#68](https://github.com/mfozmen/littlepress-ai/pull/68),
-  [`c6507c7`](https://github.com/mfozmen/littlepress-ai/commit/c6507c79a47864591430d2d3eaed484e8c25a876))
+  [`0a6a89b`](https://github.com/mfozmen/littlepress-ai/commit/0a6a89b336c884bc2ee171ecdde7f7c0d52d76e1))
 
 * feat(imposition): real-book pagination — back cover on outside-back, story on recto
 
@@ -374,7 +668,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **agent-tools**: Flip <MIXED> default to text-only layout; tighten vision prompt
   ([#67](https://github.com/mfozmen/littlepress-ai/pull/67),
-  [`00b6109`](https://github.com/mfozmen/littlepress-ai/commit/00b610962cd2c49b96e7369fbadd194efdfde735))
+  [`f7c7712`](https://github.com/mfozmen/littlepress-ai/commit/f7c7712e669d44fcbbaa49e4770443ce0bdbb167))
 
 * fix(ingestion): flip <MIXED> default to text-only layout; tighten vision prompt
 
@@ -455,7 +749,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.14.1 [skip ci]
-  ([`6fbc109`](https://github.com/mfozmen/littlepress-ai/commit/6fbc1098e480620ab978e47010c93d5c344ad302))
+  ([`37f20ed`](https://github.com/mfozmen/littlepress-ai/commit/37f20edb99d81b85a0ac9c9de24c5e54bc13c4ab))
 
 
 ## v1.14.0 (2026-04-24)
@@ -463,12 +757,12 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.14.0 [skip ci]
-  ([`3f193d2`](https://github.com/mfozmen/littlepress-ai/commit/3f193d2253840944b45396f8358497ea200faab8))
+  ([`8b25ca5`](https://github.com/mfozmen/littlepress-ai/commit/8b25ca5e32e888aafb9e710f2fe70ada1a53a96b))
 
 ### Documentation
 
 - **plan**: Two real-session bugs from Yavru Dinozor v3 + note on shadow-install cause
-  ([`e6638e3`](https://github.com/mfozmen/littlepress-ai/commit/e6638e374ae66fdbfd3c47ebaba0de677b91d569))
+  ([`ae5caa5`](https://github.com/mfozmen/littlepress-ai/commit/ae5caa59293ec5d628911ff7ec111e5a7c3940ee))
 
 First successful end-to-end run after clearing a stale ``child-book-generator`` editable install
   (pre-PR-#19 clone) that was shadowing every push — that was the actual cause of the ingestion
@@ -492,7 +786,7 @@ Two real bugs surfaced on the clean run:
 
 - **repl**: Offer AI-draft option for the back-cover blurb
   ([#66](https://github.com/mfozmen/littlepress-ai/pull/66),
-  [`e05fff1`](https://github.com/mfozmen/littlepress-ai/commit/e05fff1f476024e44bb896f8cdf166a9b5fc63b4))
+  [`6e8aeca`](https://github.com/mfozmen/littlepress-ai/commit/6e8aeca60c8c186e3f1927f4774a5a9fe820e84c))
 
 * feat(repl): offer AI-draft option for the back-cover blurb
 
@@ -571,13 +865,13 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.13.0 [skip ci]
-  ([`9010d1e`](https://github.com/mfozmen/littlepress-ai/commit/9010d1edbc5f6d8cf32de1a2fe7fdfe8be4f0cd5))
+  ([`03b9331`](https://github.com/mfozmen/littlepress-ai/commit/03b9331fb0e98b39ccff56ba0552c62d35ce6acb))
 
 ### Features
 
 - **ingestion**: Run OCR + sentinel classification before the agent starts
   ([#65](https://github.com/mfozmen/littlepress-ai/pull/65),
-  [`a781178`](https://github.com/mfozmen/littlepress-ai/commit/a781178349c8528755f5f0c8e5b6ab3a5a78ee81))
+  [`06e7fcd`](https://github.com/mfozmen/littlepress-ai/commit/06e7fcd008b62f9f96e3e0d6dfd543e7df4a7e13))
 
 * docs(spec): deterministic ingestion — first sub-project of AI-only-for-judgment refactor
 
@@ -717,12 +1011,12 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.12.0 [skip ci]
-  ([`0bcfe81`](https://github.com/mfozmen/littlepress-ai/commit/0bcfe810f6255dbfbdbe203b70477b23231fb85e))
+  ([`f5446df`](https://github.com/mfozmen/littlepress-ai/commit/f5446df7fd1f1751d795072baa69aa0587971b1d))
 
 ### Documentation
 
 - **plan**: Capture Yavru Dinozor v2 failure modes + prescribe ingestion-out-of-LLM refactor
-  ([`183d2c3`](https://github.com/mfozmen/littlepress-ai/commit/183d2c3f442742cda4febba3f5a212ba4c9ffb6e))
+  ([`da66921`](https://github.com/mfozmen/littlepress-ai/commit/da66921be67a39c6a7a660bc28f5bfed2b70869b))
 
 Session transcript from 2026-04-23 (OpenAI provider this time) kept producing pre-refactor behaviour
   despite PR #60/#62/#63 landing: per-page confirm prompts, keep_image=true parameter references,
@@ -735,7 +1029,7 @@ Prompt engineering has hit its ceiling. The real fix -- taking ingestion off the
   Captured the scope and entry criteria in PLAN so the refactor PR has a clear brief to pick up.
 
 - **plan**: Sharpen "AI only for judgment" scope — back-cover blurb opt-in path
-  ([`f54be23`](https://github.com/mfozmen/littlepress-ai/commit/f54be238fc1b9026a4d8b2afc62b5a0455992a03))
+  ([`23b5817`](https://github.com/mfozmen/littlepress-ai/commit/23b5817ebf733a38f373f9cba5879ee7546dd55a))
 
 Maintainer's architectural call: deterministic Python collects data (title/author/series/cover
   menu/metadata review); LLM is for judgment and creativity only. Concrete example added to the
@@ -752,7 +1046,7 @@ Also enumerates the full split upfront so the refactor's brainstorm has a clear 
 
 - **repl**: Restore series question to greeting
   ([#64](https://github.com/mfozmen/littlepress-ai/pull/64),
-  [`3a64133`](https://github.com/mfozmen/littlepress-ai/commit/3a6413314fd4546adee5ee6ebc93d73e04973221))
+  [`0159820`](https://github.com/mfozmen/littlepress-ai/commit/01598201b2011cf49b572d1a4176e9dc10635d1f))
 
 * feat(repl): restore the "is this a series?" greeting question
 
@@ -807,7 +1101,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **agent**: Address PR #62 post-merge review — uniform wording, stop typo_fix text echo, regression
   guards ([#63](https://github.com/mfozmen/littlepress-ai/pull/63),
-  [`fab05c6`](https://github.com/mfozmen/littlepress-ai/commit/fab05c68ca964803ee97292775dc0a1db58938da))
+  [`08a4a53`](https://github.com/mfozmen/littlepress-ai/commit/08a4a53ca7a6a567078b377f8df9ba9676753dfb))
 
 * fix(agent): address PR #62 review — uniform branch wording, stop echoing page text in
   propose_typo_fix, add regression guards
@@ -860,7 +1154,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.11.4 [skip ci]
-  ([`7b4a245`](https://github.com/mfozmen/littlepress-ai/commit/7b4a245f076fd4cff93dd8febf42626f83e76055))
+  ([`6afecc7`](https://github.com/mfozmen/littlepress-ai/commit/6afecc70cfa7bd81eae1208f23040fc1f3ecbfdc))
 
 
 ## v1.11.3 (2026-04-23)
@@ -869,7 +1163,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **agent**: Drop Preview from transcribe_page tool response + add explicit "do not display"
   directive ([#62](https://github.com/mfozmen/littlepress-ai/pull/62),
-  [`8050fdd`](https://github.com/mfozmen/littlepress-ai/commit/8050fdd4a52a7b5678e9d8188032bd97c67e20bb))
+  [`cfff4d0`](https://github.com/mfozmen/littlepress-ai/commit/cfff4d0788565bebf4706d240d07d5756e62963f))
 
 Real-session test showed the agent STILL emitting per-page "Apply this OCR transcription to page N?
   ... Approve? (y/n)" pseudo-confirms even after the greeting's forbidden-pattern block was removed.
@@ -893,7 +1187,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.11.3 [skip ci]
-  ([`df0e792`](https://github.com/mfozmen/littlepress-ai/commit/df0e792b2aabd5ca2315751d7c75e8968652218f))
+  ([`28434d2`](https://github.com/mfozmen/littlepress-ai/commit/28434d243f0e54ebafc8f2bab2601825a5d873d5))
 
 
 ## v1.11.2 (2026-04-23)
@@ -902,7 +1196,7 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **agent**: Drop Preview from transcribe_page tool response + add explicit "do not display"
   directive
-  ([`4aa6260`](https://github.com/mfozmen/littlepress-ai/commit/4aa6260d0721ba59c500829e51b0e752e5cd1ad4))
+  ([`1b18176`](https://github.com/mfozmen/littlepress-ai/commit/1b18176d2b7a4374bef3d07fbf504c4cd02cd629))
 
 Real-session test showed the agent STILL emitting per-page "Apply this OCR transcription to page N?
   ... Approve? (y/n)" pseudo-confirms even after the greeting's forbidden-pattern block was removed.
@@ -924,7 +1218,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.11.2 [skip ci]
-  ([`245776a`](https://github.com/mfozmen/littlepress-ai/commit/245776a5599ccd37202d1d0269e6582ad553cd00))
+  ([`313724c`](https://github.com/mfozmen/littlepress-ai/commit/313724cb1a8ac3f5d7c1a902964d39eda50dba34))
 
 
 ## v1.11.1 (2026-04-23)
@@ -932,7 +1226,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Bug Fixes
 
 - **repl**: Remove greeting's forbidden-pattern list that was feeding the LLM
-  ([`80d04b6`](https://github.com/mfozmen/littlepress-ai/commit/80d04b6c25e31c86f9ebd16ea153bc8de434dfaf))
+  ([`3123220`](https://github.com/mfozmen/littlepress-ai/commit/3123220ed833c51e2feb71208a354c660a4e3714))
 
 PR #61 added a "CRITICAL — NO FAKE CONFIRMATION UI" block to ``_AGENT_GREETING_HINT`` that
   enumerated the old UI strings (``Apply this OCR transcription to page N?``, ``Approve? (y/n)``,
@@ -953,7 +1247,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.11.1 [skip ci]
-  ([`c789e94`](https://github.com/mfozmen/littlepress-ai/commit/c789e9457040012faf136223a392bc72ace2a227))
+  ([`0834cba`](https://github.com/mfozmen/littlepress-ai/commit/0834cba757e2d6e2c8c68b68c3aa3f8adba25399))
 
 
 ## v1.11.0 (2026-04-23)
@@ -962,7 +1256,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **repl**: Forbid agent from mimicking old confirm UI in greeting
   ([#61](https://github.com/mfozmen/littlepress-ai/pull/61),
-  [`904dee5`](https://github.com/mfozmen/littlepress-ai/commit/904dee588437cb5390c95f842b55e0c29acd1cac))
+  [`102ba25`](https://github.com/mfozmen/littlepress-ai/commit/102ba257cca65084ad562d83842ee9e9a584ab1a))
 
 * fix(repl): forbid agent from mimicking the old confirm UI in greeting
 
@@ -1020,13 +1314,13 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.11.0 [skip ci]
-  ([`dacc425`](https://github.com/mfozmen/littlepress-ai/commit/dacc42572b1130038c1449797bd2a680a8d0f843))
+  ([`01788ef`](https://github.com/mfozmen/littlepress-ai/commit/01788efc2521549f47871d1736bab29fd275193b))
 
 ### Documentation
 
 - **agent_tools**: Audit module docstring against registered tools
   ([#59](https://github.com/mfozmen/littlepress-ai/pull/59),
-  [`03e63b5`](https://github.com/mfozmen/littlepress-ai/commit/03e63b5e56b7df6dff03fddcc4f73a701028404f))
+  [`fd29381`](https://github.com/mfozmen/littlepress-ai/commit/fd293813ea14c5d164394ab210eee33571192d67))
 
 Follow-up to PR #58 round-1 #5. The module docstring under-listed the confirm-gated tools (missing
   ``generate_page_illustration``) and misstated the preserve-child-voice contract — it claimed
@@ -1051,7 +1345,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - **plan**: Expand transcribe_page entry with decline-misread failure
-  ([`452a7f8`](https://github.com/mfozmen/littlepress-ai/commit/452a7f8e332f7fa432abe8dfb162df9af1849756))
+  ([`70200e5`](https://github.com/mfozmen/littlepress-ai/commit/70200e534c12541776ca3bf5fe01b126ece4f13f))
 
 Same Yavru Dinozor session, second failure mode: after the agent surfaced the wrong keep_image=True
   confirm and the user said n, the agent punted to "type out the text manually" instead of retrying
@@ -1060,7 +1354,7 @@ Same Yavru Dinozor session, second failure mode: after the agent surfaced the wr
   regression tests the fix needs to ship with.
 
 - **plan**: Flag wrong keep_image default on Samsung-Notes transcribe
-  ([`4f133b5`](https://github.com/mfozmen/littlepress-ai/commit/4f133b5d8486b38fd797dcf654eb409bed4c044b))
+  ([`0a30fc9`](https://github.com/mfozmen/littlepress-ai/commit/0a30fc952a1f519b218564c8c8ba1dc595044b18))
 
 Surfaced by the second Yavru Dinozor run: the agent defaults to keep_image=True when every page has
   an image, but for Samsung Notes / phone-scan exports the image IS the text and keep_image=False is
@@ -1068,7 +1362,7 @@ Surfaced by the second Yavru Dinozor run: the agent defaults to keep_image=True 
   placeholder entry so it doesn't slip.
 
 - **plan**: Note "same question?" UX nit on transcribe_page confirm
-  ([`c20cc5a`](https://github.com/mfozmen/littlepress-ai/commit/c20cc5a692a6a1885d865bc739ca1d0e31f79f35))
+  ([`5b83787`](https://github.com/mfozmen/littlepress-ai/commit/5b837873e9707a4626d99aebefbeae479017fb74))
 
 Follow-on from the same Yavru Dinozor session: after declining the keep_image=True branch and
   retrying with keep_image=False, the user read the re-prompt as identical because the Approve?
@@ -1077,7 +1371,7 @@ Follow-on from the same Yavru Dinozor session: after declining the keep_image=Tr
   transcribe_page follow-up so it lands in the same PR.
 
 - **plan**: Relocate preserve-child-voice gate from pre-approval to post-render review
-  ([`81cb051`](https://github.com/mfozmen/littlepress-ai/commit/81cb051c9369f5ef115570e6b7a6ab8da9c11619))
+  ([`1f4d154`](https://github.com/mfozmen/littlepress-ai/commit/1f4d154f538f0466dd6059fe7ff1415592c2c72b))
 
 Yavru Dinozor test surfaced that the per-mutation confirm gate has become the UX problem the project
   is supposed to solve. Direct maintainer feedback: "it's an AI project -- produce the book, then
@@ -1092,7 +1386,7 @@ Design round must precede the first implementation PR; that PR will touch agent_
   (greeting + confirm plumbing), CLAUDE.md, and the preserve-child-voice skill.
 
 - **plan**: Sharpen post-render review into page-number-first question
-  ([`43f8a28`](https://github.com/mfozmen/littlepress-ai/commit/43f8a28b81322b4f7d699703f2dbd8acda0f7b35))
+  ([`0b226c9`](https://github.com/mfozmen/littlepress-ai/commit/0b226c96c09cfbd95357aa3b3793d2ed99d90925))
 
 Maintainer refinement: picture books are short, so the review step should lead with a numeric ask
   ("which page numbers have issues?") rather than a free-form "any issues?". User types a short list
@@ -1103,7 +1397,7 @@ Maintainer refinement: picture books are short, so the review step should lead w
 
 - **gate**: Move preserve-child-voice from pre-approval to post-render review
   ([#60](https://github.com/mfozmen/littlepress-ai/pull/60),
-  [`19acd8d`](https://github.com/mfozmen/littlepress-ai/commit/19acd8ded95f5338e92296c9da5f707910853778))
+  [`e51d0a0`](https://github.com/mfozmen/littlepress-ai/commit/e51d0a08d63f9286414f541ee974d9816928c62c))
 
 * docs(spec): review-based preserve-child-voice gate design
 
@@ -1273,7 +1567,7 @@ checkpoint, review-step ordering regex, summarise-verbatim). Added 5 new Task 11
 
 * fix(repl): wire apply_text_correction and restore_page into _build_agent
 
-Both tools were implemented in Tasks 4–5 (feat commits 997b6a6 and a65bc8a) but never registered in
+Both tools were implemented in Tasks 4–5 (feat commits ae3e02e and 77bab3b) but never registered in
   Repl._build_agent, so the agent loop couldn't dispatch them. Adds the two factory calls and their
   imports.
 
@@ -1434,7 +1728,7 @@ Full suite: 633 passing (was 632; +1 regression).
 
 PR #60 round-6 review finding, below threshold: the inline comment above the ``glob`` call in
   restore_page still listed only ``WebP, GIF, TIFF, BMP`` for exotic PDF embeddings, even though the
-  round-5 commit ``0472e91`` added JPEG2000 to ``_PIL_IMAGE_EXTS`` and its module-level comment.
+  round-5 commit ``eeb3fbc`` added JPEG2000 to ``_PIL_IMAGE_EXTS`` and its module-level comment.
   Aligned the inline prose so the three places (module comment, inline comment, allow-list set) all
   name the same set of formats.
 
@@ -1450,13 +1744,13 @@ Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.10.0 [skip ci]
-  ([`a799600`](https://github.com/mfozmen/littlepress-ai/commit/a799600eec75f75bd999a1a9aab89e94a8579a0b))
+  ([`09032a0`](https://github.com/mfozmen/littlepress-ai/commit/09032a08f1a71cab89c154bf7db98e651b5950de))
 
 ### Features
 
 - **cleanup**: Auto-prune orphan images and old render snapshots
   ([#58](https://github.com/mfozmen/littlepress-ai/pull/58),
-  [`cc9835b`](https://github.com/mfozmen/littlepress-ai/commit/cc9835b92686c5cec2e567c7425506eb00555912))
+  [`961f76a`](https://github.com/mfozmen/littlepress-ai/commit/961f76a75c1b79c958e7a411ea64549312c43f6e))
 
 * feat(cleanup): auto-prune orphan images and old render snapshots
 
@@ -1513,7 +1807,7 @@ Also expanded the module docstring's "never touched" section to explicitly name 
 
 Reviewer round 3 on PR #58 caught that ``orphaned_images()``'s own docstring still described the
   pre-round-2 convention (``page-<10-hex>.png``) even though the regex, sibling comment, and module
-  docstring all moved to ``page-<N>-<10hex>.png`` in 9e33fbb. Code is correct; the drift was inside
+  docstring all moved to ``page-<N>-<10hex>.png`` in 2676a92. Code is correct; the drift was inside
   the function's docstring example only.
 
 ---------
@@ -1528,13 +1822,13 @@ Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.9.0 [skip ci]
-  ([`e954b3c`](https://github.com/mfozmen/littlepress-ai/commit/e954b3c67aae3bb25295f021f358e9903c7cc42d))
+  ([`2d16952`](https://github.com/mfozmen/littlepress-ai/commit/2d169525b38c279349e9310bc5922c1dd99d0f19))
 
 ### Features
 
 - **agent**: Generate_page_illustration — restore illustrations after OCR
   ([#57](https://github.com/mfozmen/littlepress-ai/pull/57),
-  [`d101aac`](https://github.com/mfozmen/littlepress-ai/commit/d101aacf70986030914f24a29d850b522fbfd6c1))
+  [`f2ed039`](https://github.com/mfozmen/littlepress-ai/commit/f2ed0392f4db154e4cf0d79c00279a6a8a4d5a2f))
 
 * feat(agent): generate_page_illustration — restore illustrations after OCR
 
@@ -1674,13 +1968,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.8.0 [skip ci]
-  ([`57b50a0`](https://github.com/mfozmen/littlepress-ai/commit/57b50a08713b411263f39c799abedfb03b2b9c38))
+  ([`d86b31f`](https://github.com/mfozmen/littlepress-ai/commit/d86b31f230dac20c8e6431ce668958806027b17c))
 
 ### Features
 
 - **agent**: Tesseract OCR fallback for transcribe_page
   ([#56](https://github.com/mfozmen/littlepress-ai/pull/56),
-  [`bd05b12`](https://github.com/mfozmen/littlepress-ai/commit/bd05b125ee69c27e64f4662f440c4a5ca143321a))
+  [`5fcf57f`](https://github.com/mfozmen/littlepress-ai/commit/5fcf57fc7b534b18389df27a5f39366fd0918b17))
 
 * feat(agent): Tesseract OCR fallback for transcribe_page
 
@@ -1826,13 +2120,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.7.0 [skip ci]
-  ([`3ff67dc`](https://github.com/mfozmen/littlepress-ai/commit/3ff67dc0ade25b2d98932f91db5445f1a58de420))
+  ([`106f1d8`](https://github.com/mfozmen/littlepress-ai/commit/106f1d86538a6578186375eb2acaf24a549c6758))
 
 ### Features
 
 - **llm**: Multi-provider transcribe_page via per-provider image translators
   ([#55](https://github.com/mfozmen/littlepress-ai/pull/55),
-  [`ece8a9b`](https://github.com/mfozmen/littlepress-ai/commit/ece8a9b148d86eb30ba60bd2c3cf2c2c8cf18835))
+  [`fde5525`](https://github.com/mfozmen/littlepress-ai/commit/fde55251baa314d1a6e701ca85fda56ed30fb855))
 
 * feat(llm): multi-provider transcribe_page via per-provider image translators
 
@@ -1946,7 +2240,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **agent_tools**: Extract helpers to tame three S3776 hotspots
   ([#53](https://github.com/mfozmen/littlepress-ai/pull/53),
-  [`ba92ed4`](https://github.com/mfozmen/littlepress-ai/commit/ba92ed4e78a87ccb990856ad86c52e3e75707914))
+  [`5a99c04`](https://github.com/mfozmen/littlepress-ai/commit/5a99c0424022c2ba74026b6b0f46e41ecd5cb6cf))
 
 * refactor(agent_tools): extract helpers to tame three S3776 hotspots
 
@@ -2028,7 +2322,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **llm**: Split provider translators to close the S3776 backlog
   ([#54](https://github.com/mfozmen/littlepress-ai/pull/54),
-  [`9fdaf1e`](https://github.com/mfozmen/littlepress-ai/commit/9fdaf1e3f3f79ea68d12799b735551f3aac1580e))
+  [`da08cc0`](https://github.com/mfozmen/littlepress-ai/commit/da08cc0b787638463cfe351f5e4efa6812536bed))
 
 * refactor(llm): split provider translators to close S3776 backlog
 
@@ -2135,13 +2429,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.6.0 [skip ci]
-  ([`4f40b73`](https://github.com/mfozmen/littlepress-ai/commit/4f40b739e21872d12e9895aebd6c08e1e1150d8d))
+  ([`70998fc`](https://github.com/mfozmen/littlepress-ai/commit/70998fc7831aa6a2134127415b983b7c7c7493cd))
 
 ### Features
 
 - **agent**: Render_book message names each output file's role
   ([#52](https://github.com/mfozmen/littlepress-ai/pull/52),
-  [`c72acc4`](https://github.com/mfozmen/littlepress-ai/commit/c72acc4fd78a6ee2ac648fa2a93309d64f0e1bc8))
+  [`29a607f`](https://github.com/mfozmen/littlepress-ai/commit/29a607f492186c567baa50728f40ce36909893d1))
 
 * feat(agent): render_book message names each output file's role
 
@@ -2224,13 +2518,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.5.0 [skip ci]
-  ([`190bbc7`](https://github.com/mfozmen/littlepress-ai/commit/190bbc70eb85856bed57a5e50101c629cada1026))
+  ([`26eff6f`](https://github.com/mfozmen/littlepress-ai/commit/26eff6f26aadbf97a3418cc9c3526f278ee77d39))
 
 ### Features
 
 - **agent**: Metadata review step + back-cover blurb prompt
   ([#51](https://github.com/mfozmen/littlepress-ai/pull/51),
-  [`b2c9b11`](https://github.com/mfozmen/littlepress-ai/commit/b2c9b1120e480311fe08486c9ee2ffb6ea7703b0))
+  [`474d3dd`](https://github.com/mfozmen/littlepress-ai/commit/474d3dde61a2a2425c80beaa533e3f6121d556e6))
 
 * feat(agent): metadata review step + back-cover blurb prompt
 
@@ -2329,13 +2623,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.4.0 [skip ci]
-  ([`f304c9d`](https://github.com/mfozmen/littlepress-ai/commit/f304c9dc47e89480f1b3e759ad6d0aad00723c55))
+  ([`8c6faf8`](https://github.com/mfozmen/littlepress-ai/commit/8c6faf81b4f07a4b056e57a9848221ad2433686d))
 
 ### Features
 
 - **agent**: Always ask the series question, every book
   ([#50](https://github.com/mfozmen/littlepress-ai/pull/50),
-  [`0a53a53`](https://github.com/mfozmen/littlepress-ai/commit/0a53a5351b7971b7502e29a4670c9297cdfae753))
+  [`7bd8777`](https://github.com/mfozmen/littlepress-ai/commit/7bd8777a1b43d27e685d30fb3f705e695eeb3d45))
 
 P4 from the Yavru Dinozor second-run feedback. The maintainer's call: ask *every* book whether it's
   part of a series, not only
@@ -2375,13 +2669,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.3.0 [skip ci]
-  ([`42f749b`](https://github.com/mfozmen/littlepress-ai/commit/42f749b1ca2d3dcde6ab2736a13e46625e1f1e5d))
+  ([`690ee7c`](https://github.com/mfozmen/littlepress-ai/commit/690ee7c8455fe1b56bb1ddc6c225f351e16c3706))
 
 ### Features
 
 - **agent**: Surface AI cover + poster as first-class cover options
   ([#49](https://github.com/mfozmen/littlepress-ai/pull/49),
-  [`8a6b92d`](https://github.com/mfozmen/littlepress-ai/commit/8a6b92da74e719cde361f72d996c827d94d45ed4))
+  [`a5f0299`](https://github.com/mfozmen/littlepress-ai/commit/a5f0299063f8e5f95a12cf053344a81f17c43a1d))
 
 * feat(agent): surface AI cover + poster as first-class cover options
 
@@ -2472,7 +2766,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **agent**: Drop source image after OCR + skip_page tool — end of the duplicate-text bug
   ([#48](https://github.com/mfozmen/littlepress-ai/pull/48),
-  [`400af87`](https://github.com/mfozmen/littlepress-ai/commit/400af876da236bfb863b550e035007bdb5d18b10))
+  [`93b3a7d`](https://github.com/mfozmen/littlepress-ai/commit/93b3a7d0f93dde680ed8679457f2e86ecb98424e))
 
 * fix(agent): drop source image + skip_page tool — end of the duplicate-text bug
 
@@ -2638,7 +2932,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.2.2 [skip ci]
-  ([`960ee43`](https://github.com/mfozmen/littlepress-ai/commit/960ee4363d4670bb1efe0a389ea9f02c4519a783))
+  ([`e7c0dd7`](https://github.com/mfozmen/littlepress-ai/commit/e7c0dd7c1a47f096d2aad1adc0f7c6a258b5c56b))
 
 
 ## v1.2.1 (2026-04-18)
@@ -2647,7 +2941,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **agent**: Transcribe_page rejects blank-image meta-responses
   ([#47](https://github.com/mfozmen/littlepress-ai/pull/47),
-  [`02be7e0`](https://github.com/mfozmen/littlepress-ai/commit/02be7e0860c25bc0e966da2a00f6546403ac50d9))
+  [`16fff0d`](https://github.com/mfozmen/littlepress-ai/commit/16fff0dceec9cdd9039aa100ddb2a3b2cc433e3a))
 
 * fix(agent): transcribe_page rejects blank-image meta-responses
 
@@ -2743,7 +3037,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.2.1 [skip ci]
-  ([`22c8cae`](https://github.com/mfozmen/littlepress-ai/commit/22c8cae67aa1f0b1e082d1dd318256f1d121e02b))
+  ([`682dc2a`](https://github.com/mfozmen/littlepress-ai/commit/682dc2ad3cc6d8c1cff2027568d117cfce93263e))
 
 
 ## v1.2.0 (2026-04-17)
@@ -2751,13 +3045,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.2.0 [skip ci]
-  ([`74c3b0d`](https://github.com/mfozmen/littlepress-ai/commit/74c3b0d457af9f268d77dbb7284ac1b3e293a5c3))
+  ([`7e371f8`](https://github.com/mfozmen/littlepress-ai/commit/7e371f8b6072ce72f387fb1059488ba106f1e87b))
 
 ### Features
 
 - **agent**: Transcribe_page tool — OCR image-only PDFs via LLM vision
   ([#46](https://github.com/mfozmen/littlepress-ai/pull/46),
-  [`6ddbd4d`](https://github.com/mfozmen/littlepress-ai/commit/6ddbd4dfd6b8c2993b9d048b051f76a240bd6fa5))
+  [`4e7a129`](https://github.com/mfozmen/littlepress-ai/commit/4e7a1293b5a8b19f151752f764d44daab3abc122))
 
 * feat(agent): transcribe_page tool via LLM vision for image-only PDFs
 
@@ -2869,7 +3163,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - Clear easy SonarCloud issues + 3 cognitive-complexity wins
   ([#45](https://github.com/mfozmen/littlepress-ai/pull/45),
-  [`37e1ab5`](https://github.com/mfozmen/littlepress-ai/commit/37e1ab567ffa7774844968a83b8f22f14229e508))
+  [`8bd3551`](https://github.com/mfozmen/littlepress-ai/commit/8bd3551bcd20da36aa1db1d60487b21865dbb9e8))
 
 * refactor: clear easy SonarCloud issues + 3 cognitive-complexity wins
 
@@ -2938,7 +3232,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **agent**: Flag image-only PDFs and surface AI cover option
   ([#44](https://github.com/mfozmen/littlepress-ai/pull/44),
-  [`ae77a81`](https://github.com/mfozmen/littlepress-ai/commit/ae77a8153485c1564ceaec33d383cd6c036c217c))
+  [`b72c10d`](https://github.com/mfozmen/littlepress-ai/commit/b72c10d9de8ea47717c98d613af3ad033bf1b46c))
 
 * fix(agent): flag image-only PDFs and surface AI cover option
 
@@ -3032,13 +3326,13 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Chores
 
 - **release**: 1.1.1 [skip ci]
-  ([`52c4daa`](https://github.com/mfozmen/littlepress-ai/commit/52c4daabb7ff923cdb90c90f3fb038fc0b74c861))
+  ([`5dcae4c`](https://github.com/mfozmen/littlepress-ai/commit/5dcae4ce7b010ae8b07167ec62ee8dd9879cec39))
 
 ### Continuous Integration
 
 - Re-enable auto release on push to main after v1.1.0 reset
   ([#43](https://github.com/mfozmen/littlepress-ai/pull/43),
-  [`29132a7`](https://github.com/mfozmen/littlepress-ai/commit/29132a794ed97ceb8e4ab52eb1efdeec2254815f))
+  [`b63153a`](https://github.com/mfozmen/littlepress-ai/commit/b63153aef4672a1ac8063c289eb1a5006b6758ad))
 
 * ci: re-enable push-on-main release trigger alongside workflow_dispatch
 
@@ -3083,7 +3377,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **builder**: Stop inserting surprise blank pages in rendered books
   ([#28](https://github.com/mfozmen/littlepress-ai/pull/28),
-  [`4ae2dfc`](https://github.com/mfozmen/littlepress-ai/commit/4ae2dfcd8ade9b520757d3b5f000f87a8c3d25da))
+  [`5bb4e8f`](https://github.com/mfozmen/littlepress-ai/commit/5bb4e8fa9ae55e7823dc424c047d03567db3575b))
 
 The A5 PDF used to carry two blank pages the user never asked for:
 
@@ -3109,7 +3403,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Accept /exit in the provider picker
   ([#23](https://github.com/mfozmen/littlepress-ai/pull/23),
-  [`2478190`](https://github.com/mfozmen/littlepress-ai/commit/24781907d09377cc3be64d567423357d52ebe393))
+  [`d3d44f4`](https://github.com/mfozmen/littlepress-ai/commit/d3d44f4d695350c8abff5845a29fd63921ef8cc5))
 
 * fix(repl): accept /exit in the provider picker
 
@@ -3147,7 +3441,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Kick the agent off after a mid-session /load
   ([#27](https://github.com/mfozmen/littlepress-ai/pull/27),
-  [`d543b83`](https://github.com/mfozmen/littlepress-ai/commit/d543b837a43ad27d14a83966bacfd779cd079ec0))
+  [`48835a2`](https://github.com/mfozmen/littlepress-ai/commit/48835a2b9219c7e4cebed75e40cdd6dd20dc957f))
 
 Reported by the maintainer: dragging a PDF onto a live session loaded the draft but the agent stayed
   silent afterwards — the user saw "Loaded 8 pages" and then nothing.
@@ -3172,7 +3466,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Retry with same key on transient errors instead of re-reading
   ([#22](https://github.com/mfozmen/littlepress-ai/pull/22),
-  [`86939ac`](https://github.com/mfozmen/littlepress-ai/commit/86939acfe12276581bd8762d81397a4bc6ba5b1e))
+  [`2b8e39c`](https://github.com/mfozmen/littlepress-ai/commit/2b8e39c9f1380e73ba9ce75179ab9e07af3b7d86))
 
 Reported after the credit-balance error retry: pressing Enter at the "Press Enter to retry" prompt
   crashed the REPL with a TypeError from the Anthropic SDK ("Could not resolve authentication
@@ -3196,7 +3490,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Strip surrounding quotes from /load paths
   ([#24](https://github.com/mfozmen/littlepress-ai/pull/24),
-  [`a3e0434`](https://github.com/mfozmen/littlepress-ai/commit/a3e043467e3a07df7352ced3c05aba23e5f409dc))
+  [`7207be6`](https://github.com/mfozmen/littlepress-ai/commit/7207be6454fb20a67c3f32ff05e89edaa0dd1d23))
 
 * fix(repl): strip surrounding quotes from /load paths
 
@@ -3228,7 +3522,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Drop the legacy 'python build.py' entry point
   ([#38](https://github.com/mfozmen/littlepress-ai/pull/38),
-  [`2b01a6a`](https://github.com/mfozmen/littlepress-ai/commit/2b01a6a22fe11c2a9f789db38bf34d913af7caac))
+  [`eac795c`](https://github.com/mfozmen/littlepress-ai/commit/eac795c94a43464b570dba7cd50b06fb629613d8))
 
 * chore: drop the legacy ``python build.py`` entry point
 
@@ -3279,85 +3573,85 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **release**: 1.0.2 [skip ci]
-  ([`3cb7491`](https://github.com/mfozmen/littlepress-ai/commit/3cb7491a4a93c354a2dcbbf63f5a12d308e20b59))
+  ([`120bc13`](https://github.com/mfozmen/littlepress-ai/commit/120bc13d9b5e94296fcbafec51ba6dd5bb1113e9))
 
 - **release**: 1.0.2 [skip ci]
-  ([`0876c0e`](https://github.com/mfozmen/littlepress-ai/commit/0876c0e2b01ca2931a4c5ede2738baa6fb81fe05))
+  ([`b98626f`](https://github.com/mfozmen/littlepress-ai/commit/b98626fab32e1da9521cda0597375a8a26b05400))
 
 - **release**: 1.0.2 [skip ci]
-  ([`95e2a6c`](https://github.com/mfozmen/littlepress-ai/commit/95e2a6c8c37e9d9f02ae5a52dc0d2a8d47121767))
+  ([`c918080`](https://github.com/mfozmen/littlepress-ai/commit/c9180800be7805ed4237662b945cc2286051654f))
 
 - **release**: 1.1.0 [skip ci]
-  ([`115b7dc`](https://github.com/mfozmen/littlepress-ai/commit/115b7dc7357165d4680e23e448152f2c316f8066))
+  ([`c55eb55`](https://github.com/mfozmen/littlepress-ai/commit/c55eb55c97e29e7e656130f8e04cbd4f54a8f271))
 
 - **release**: 1.1.0 [skip ci]
-  ([`7e00bf5`](https://github.com/mfozmen/littlepress-ai/commit/7e00bf5c553083d628ca7d4924ef1dd8f3caa512))
+  ([`0689d3d`](https://github.com/mfozmen/littlepress-ai/commit/0689d3d281c31c3bcef4c940a7329c36ba07744b))
 
 - **release**: 1.1.0 [skip ci]
-  ([`0af9b30`](https://github.com/mfozmen/littlepress-ai/commit/0af9b3031066e4e84eca80847c586c328b749f6a))
+  ([`3e59b00`](https://github.com/mfozmen/littlepress-ai/commit/3e59b005635947583f48677da6b30a9de2313baa))
 
 - **release**: 1.1.0 [skip ci]
-  ([`8fbde37`](https://github.com/mfozmen/littlepress-ai/commit/8fbde37198f247b8b868de2411eac004b75280c4))
+  ([`e65d2fa`](https://github.com/mfozmen/littlepress-ai/commit/e65d2fa17f16a6995cd6f7690eacbb35e7a2744a))
 
 - **release**: 1.1.0 [skip ci]
-  ([`96cbe1a`](https://github.com/mfozmen/littlepress-ai/commit/96cbe1a35118f805af32357e6a2007ebf8aaa5ba))
+  ([`148642b`](https://github.com/mfozmen/littlepress-ai/commit/148642bda7ea40d62c70dc7bdbd0667f216cef6d))
 
 - **release**: 1.1.0 [skip ci]
-  ([`7fd4e3c`](https://github.com/mfozmen/littlepress-ai/commit/7fd4e3cab8f27ced0587d7495b935327c9f9fe13))
+  ([`ddeaf92`](https://github.com/mfozmen/littlepress-ai/commit/ddeaf929b78152ad46bf054dc738f274ef5f87be))
 
 - **release**: 1.1.0 [skip ci]
-  ([`3e223c7`](https://github.com/mfozmen/littlepress-ai/commit/3e223c746dc0d5923aa9cd149edb8b87b492dd65))
+  ([`9c5e786`](https://github.com/mfozmen/littlepress-ai/commit/9c5e78698d29485657a99ca8f64ee1507e9b4d31))
 
 - **release**: 1.1.0 [skip ci]
-  ([`748e0b5`](https://github.com/mfozmen/littlepress-ai/commit/748e0b54b4a6e0d5314d78a6e5c4d618b36d45d9))
+  ([`048df6c`](https://github.com/mfozmen/littlepress-ai/commit/048df6cacb0ba8454cd4549bf420dd464230a394))
 
 - **release**: 1.1.0 [skip ci]
-  ([`9cc8709`](https://github.com/mfozmen/littlepress-ai/commit/9cc87096b4861db28f97bfd89b646f346d2d53da))
+  ([`6456290`](https://github.com/mfozmen/littlepress-ai/commit/64562901f6a83d10ca77c98edf4358f7f6592da0))
 
 - **release**: 1.1.0 [skip ci]
-  ([`45ca1d1`](https://github.com/mfozmen/littlepress-ai/commit/45ca1d1d9e8fdbf156d00b90d2bfa12bb95e3571))
+  ([`1462ddf`](https://github.com/mfozmen/littlepress-ai/commit/1462ddf4add661c69137314714dc5f6785d0f65b))
 
 - **release**: 1.1.0 [skip ci]
-  ([`410704f`](https://github.com/mfozmen/littlepress-ai/commit/410704f6d07f31dc7c471a71677b08d657dc2844))
+  ([`adfc792`](https://github.com/mfozmen/littlepress-ai/commit/adfc792762442abf821b4e05d589512c8202548d))
 
 - **release**: 1.1.0 [skip ci]
-  ([`e53cab0`](https://github.com/mfozmen/littlepress-ai/commit/e53cab0e77c4de6ff3733279309939bf6144a7b0))
+  ([`ce2a03f`](https://github.com/mfozmen/littlepress-ai/commit/ce2a03f1811e88d0da0373479422c509bd67506d))
 
 - **release**: 1.1.0 [skip ci]
-  ([`999d89c`](https://github.com/mfozmen/littlepress-ai/commit/999d89ce1ab9db043a1322190cb08fbcb8a06358))
+  ([`e0c7392`](https://github.com/mfozmen/littlepress-ai/commit/e0c7392613897556ae733cae98fa427f58c7b28f))
 
 - **release**: 1.1.0 [skip ci]
-  ([`b991923`](https://github.com/mfozmen/littlepress-ai/commit/b991923bcf065147a1d0e0cc3bee04b5b1fc69b9))
+  ([`e80938a`](https://github.com/mfozmen/littlepress-ai/commit/e80938a0b007c8745e01c0cf5e635c901a6f07cd))
 
 - **release**: 1.1.0 [skip ci]
-  ([`270c679`](https://github.com/mfozmen/littlepress-ai/commit/270c6794527e8d284ae8c1d339e614f43090bb54))
+  ([`51fbd0e`](https://github.com/mfozmen/littlepress-ai/commit/51fbd0e34263f1fea3505c9feb518f1cbc2b3489))
 
 - **release**: 1.1.0 [skip ci]
-  ([`801b8d1`](https://github.com/mfozmen/littlepress-ai/commit/801b8d1866937ceaa049d0663feb028d0e4f0b06))
+  ([`1fcfd00`](https://github.com/mfozmen/littlepress-ai/commit/1fcfd0077a1f7407ad67e612d01ec79f80bb69e6))
 
 - **release**: 1.1.0 [skip ci]
-  ([`0b4b9ae`](https://github.com/mfozmen/littlepress-ai/commit/0b4b9aeb8d2ff8108e99beea1d883dfc8aed3732))
+  ([`22b8e6c`](https://github.com/mfozmen/littlepress-ai/commit/22b8e6cbfa9baffb989e780f6d2d93687222549d))
 
 - **release**: 1.1.0 [skip ci]
-  ([`5facc08`](https://github.com/mfozmen/littlepress-ai/commit/5facc08c8bc2fe5b08a366347b3ca5cd5a367131))
+  ([`a8ae535`](https://github.com/mfozmen/littlepress-ai/commit/a8ae53507533a45a5f943227d255b89004eda0de))
 
 - **release**: 2.0.0 [skip ci]
-  ([`f7b7f08`](https://github.com/mfozmen/littlepress-ai/commit/f7b7f08a85e31394ace090997ba6b363503e6062))
+  ([`7d78577`](https://github.com/mfozmen/littlepress-ai/commit/7d785779f446731a3a8a2644e0a7b55f8d5500fa))
 
 - **release**: 2.0.0 [skip ci]
-  ([`774f67e`](https://github.com/mfozmen/littlepress-ai/commit/774f67e3436ca8ef2277ed88ac564bfafbcb86c1))
+  ([`8abba6b`](https://github.com/mfozmen/littlepress-ai/commit/8abba6b1aa97e1a437f48754aeba6b44cc7dc891))
 
 - **release**: 2.0.0 [skip ci]
-  ([`7d659cb`](https://github.com/mfozmen/littlepress-ai/commit/7d659cb8c7ce1d6fd71ec9a75749c93f1b7d9d92))
+  ([`f780f90`](https://github.com/mfozmen/littlepress-ai/commit/f780f90bd776239fc0526bb8a0944ce0a481ac37))
 
 - **release**: 2.0.0 [skip ci]
-  ([`5ba289c`](https://github.com/mfozmen/littlepress-ai/commit/5ba289c5e7126cedabc2a368d104ef2d225e7644))
+  ([`5b7a593`](https://github.com/mfozmen/littlepress-ai/commit/5b7a593288e6e0b502d124bb9bde75d5908322a1))
 
 ### Continuous Integration
 
 - Retry release push so a racing merge doesn't skip a version bump
   ([#21](https://github.com/mfozmen/littlepress-ai/pull/21),
-  [`b453168`](https://github.com/mfozmen/littlepress-ai/commit/b453168bb43a8fff6200017b692dd9ea52919200))
+  [`f81eb25`](https://github.com/mfozmen/littlepress-ai/commit/f81eb25003d3fb06665b283a5b23d613802b3deb))
 
 * ci: retry release push so a racing merge doesn't skip a version bump
 
@@ -3399,7 +3693,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **release**: Manual workflow_dispatch, reset version after broken auto-bump cycles
   ([#42](https://github.com/mfozmen/littlepress-ai/pull/42),
-  [`4c4b90e`](https://github.com/mfozmen/littlepress-ai/commit/4c4b90e3db066d52d97526acccfe3952f64dd7cc))
+  [`5d71b38`](https://github.com/mfozmen/littlepress-ai/commit/5d71b389057dc43a66f90ec437a7cb4e8de9e43c))
 
 * ci(release): switch to manual workflow_dispatch with force input
 
@@ -3466,7 +3760,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 ### Documentation
 
 - Add layout-variety nudge to the plan
-  ([`91738f8`](https://github.com/mfozmen/littlepress-ai/commit/91738f8eb7275b6f20aea57b07331a0f506399ea))
+  ([`5674f20`](https://github.com/mfozmen/littlepress-ai/commit/5674f2031d131108f74d5ce8cd13bc56f3dfbf70))
 
 Yavru Dinozor test had a tidy but over-regular rhythm. The skill already says "no same layout 3 in a
   row, cap image-full at 30%", but the agent never sees that — .claude/skills/ is Claude Code
@@ -3476,7 +3770,7 @@ Yavru Dinozor test had a tidy but over-regular rhythm. The skill already says "n
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Add overwrite + input-folder items to plan
-  ([`088d4b7`](https://github.com/mfozmen/littlepress-ai/commit/088d4b70791608d9ee858ea878eda1d7218209ff))
+  ([`0051cd9`](https://github.com/mfozmen/littlepress-ai/commit/0051cd94722b395845017ff6885a6f5913d66af8))
 
 End-to-end feedback turned up two housekeeping gaps:
 
@@ -3491,7 +3785,7 @@ Both land at the top of "Next up" because they affect data safety.
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Capture four issues from the first end-to-end test
-  ([`1fc14da`](https://github.com/mfozmen/littlepress-ai/commit/1fc14daf2230a77195a244aa6613cc181ba0d051))
+  ([`ea50b9c`](https://github.com/mfozmen/littlepress-ai/commit/ea50b9c87b0ee2094e22d2c6c8ccfd3faae7b4b6))
 
 The Yavru Dinozor test surfaced a handful of concrete gaps in the post-render UX and the cover page.
   Record them in Next up so the next PR has a clear target:
@@ -3508,7 +3802,7 @@ Per-page illustration generation moves up into the deferred section (follow-up t
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Drop the surprise blank pages from the plan
-  ([`96a7719`](https://github.com/mfozmen/littlepress-ai/commit/96a7719855df053cce03f54f2e1ae91cd88895bd))
+  ([`897f577`](https://github.com/mfozmen/littlepress-ai/commit/897f57718b4b23c5d109328f445d3903a41626d5))
 
 Maintainer spotted a blank page in the first end-to-end output. Two culprits in src/builder.py: a
   blank after the cover ("inside-front cover left blank" — a real-bookbinding convention) and a
@@ -3521,7 +3815,7 @@ Listed in Next up at priority #1 — quickest win with user-visible impact.
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Plan removing the legacy ``python build.py`` entry point
-  ([`2e2aba2`](https://github.com/mfozmen/littlepress-ai/commit/2e2aba28d741dd810b57b4f2470b98251cd6818a))
+  ([`ff3a8e0`](https://github.com/mfozmen/littlepress-ai/commit/ff3a8e09e2e1ff19a38d8e0aed1223b7e21b15fe))
 
 User question on PR #37: "who will use this?" about the README's "Usage — direct renderer (still
   works)" section. Good catch — nobody does. The flow predates the agent pivot; every current user
@@ -3534,7 +3828,7 @@ Added as a cleanup item to Next up so it can ship as its own focused PR (deletes
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Trim shipped "don't overwrite previous renders" from plan
-  ([`2066444`](https://github.com/mfozmen/littlepress-ai/commit/20664445c7e818d796eecab596dab399c8cab55a))
+  ([`c3435ef`](https://github.com/mfozmen/littlepress-ai/commit/c3435ef6eaa6b801a0ec5f783459ae0f0630bd78))
 
 Versioned renders (<slug>.vN.pdf snapshots alongside the stable <slug>.pdf) shipped in #30. Plan had
   the item at the top of Next up; trim it so the first entry points at the next unfinished piece
@@ -3546,7 +3840,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Mirror input PDFs so memory survives file moves
   ([#31](https://github.com/mfozmen/littlepress-ai/pull/31),
-  [`b58dac3`](https://github.com/mfozmen/littlepress-ai/commit/b58dac3fe51c7489209de43fc39d4aa549ee1535))
+  [`1bb5638`](https://github.com/mfozmen/littlepress-ai/commit/1bb563818c358dddfc6d502bb77fa74a5160c6e0))
 
 * feat: mirror input PDFs into .book-gen/input/ so memory survives file moves
 
@@ -3596,7 +3890,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Poster cover template + select-cover-template skill
   ([#35](https://github.com/mfozmen/littlepress-ai/pull/35),
-  [`38b10ef`](https://github.com/mfozmen/littlepress-ai/commit/38b10effbb0d13f0c6e2bd781386d2f6a43a4a02))
+  [`31a5493`](https://github.com/mfozmen/littlepress-ai/commit/31a549319163a131b25198a15e81944a90753b27))
 
 * feat: poster cover template + select-cover-template skill
 
@@ -3654,7 +3948,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **agent**: Ai cover generation via OpenAI gpt-image-1
   ([#41](https://github.com/mfozmen/littlepress-ai/pull/41),
-  [`526d95d`](https://github.com/mfozmen/littlepress-ai/commit/526d95da861704249ec3d992cdee6fc301ecfaf0))
+  [`58c0bf7`](https://github.com/mfozmen/littlepress-ai/commit/58c0bf7b53a1316727f18f15766038beb5417624))
 
 * feat(agent): AI cover generation via OpenAI gpt-image-1
 
@@ -3727,7 +4021,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 
 - **agent**: Auto-open the rendered A5 and surface absolute paths
   ([#29](https://github.com/mfozmen/littlepress-ai/pull/29),
-  [`d3767c3`](https://github.com/mfozmen/littlepress-ai/commit/d3767c3c37ad9f3d436369db908cbb8de45e1e10))
+  [`8f47dd4`](https://github.com/mfozmen/littlepress-ai/commit/8f47dd43d04e831e372fca64d01054dd735c7070))
 
 * feat(agent): auto-open the rendered A5 and surface absolute paths
 
@@ -3769,7 +4063,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **agent**: Layout rhythm awareness in choose_layout / propose_layouts
   ([#34](https://github.com/mfozmen/littlepress-ai/pull/34),
-  [`f160ed2`](https://github.com/mfozmen/littlepress-ai/commit/f160ed2b88f5f0a1b54b6a0ee2661e4f1417c320))
+  [`b599a09`](https://github.com/mfozmen/littlepress-ai/commit/b599a09d6e7d166905663f261b0441284a3c3bf1))
 
 * feat(agent): bake rhythm rules into layout tools + echo neighbours
 
@@ -3816,7 +4110,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **agent**: Propose_layouts tool for whole-book rhythm approval
   ([#33](https://github.com/mfozmen/littlepress-ai/pull/33),
-  [`b0eee37`](https://github.com/mfozmen/littlepress-ai/commit/b0eee3780099b089ed1d35f26491536b701f4b4e))
+  [`691cb59`](https://github.com/mfozmen/littlepress-ai/commit/691cb59905769d524ca4f25b09731773a24d1195))
 
 Per-page choose_layout is awkward for the "settle on a rhythm" phase: the agent has to ask the user
   to approve N individual decisions when what they really want to see is the full rhythm on one page
@@ -3837,7 +4131,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **pages**: Portrait-frame and title-band-top cover templates
   ([#40](https://github.com/mfozmen/littlepress-ai/pull/40),
-  [`a7d5a4e`](https://github.com/mfozmen/littlepress-ai/commit/a7d5a4e67438a27c2c992e8c56f060e5df66bb9b))
+  [`4ef8ec9`](https://github.com/mfozmen/littlepress-ai/commit/4ef8ec95489eb165764ecf0468b18704b9035766))
 
 * feat(pages): portrait-frame and title-band-top cover templates
 
@@ -3929,7 +4223,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **pages**: Two cover templates (full-bleed and framed)
   ([#32](https://github.com/mfozmen/littlepress-ai/pull/32),
-  [`37aa749`](https://github.com/mfozmen/littlepress-ai/commit/37aa749a4be4fcd2ac9935b6e79b0dab8a55f6a9))
+  [`e98ae1b`](https://github.com/mfozmen/littlepress-ai/commit/e98ae1b00aea8e9b2aa51eb148001b2c3b1257c8))
 
 * feat(pages): two cover templates (full-bleed and framed)
 
@@ -3993,7 +4287,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **providers**: Gemini (Google Gen AI) chat + tool use
   ([#36](https://github.com/mfozmen/littlepress-ai/pull/36),
-  [`eb6dca1`](https://github.com/mfozmen/littlepress-ai/commit/eb6dca1c18d24f113d706ed5c4655b8a50c53c1c))
+  [`7ea567c`](https://github.com/mfozmen/littlepress-ai/commit/7ea567cebd36c0e1fe0931ddc32772fbc6301436))
 
 * feat(providers): Gemini (Google Gen AI) chat + tool use
 
@@ -4060,7 +4354,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **providers**: Gpt (OpenAI) chat + tool use
   ([#37](https://github.com/mfozmen/littlepress-ai/pull/37),
-  [`46e33ff`](https://github.com/mfozmen/littlepress-ai/commit/46e33ff4e5c5c9404003c5c2459d619908c7acf7))
+  [`7b2ef25`](https://github.com/mfozmen/littlepress-ai/commit/7b2ef251355f0bf189c477a1a4bac0faf5cba37a))
 
 * feat(providers): GPT (OpenAI) chat + tool use
 
@@ -4110,7 +4404,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **providers**: Ollama local chat + tool use
   ([#39](https://github.com/mfozmen/littlepress-ai/pull/39),
-  [`86748bb`](https://github.com/mfozmen/littlepress-ai/commit/86748bb9c940f2f3783080c3fc4424718dc584d2))
+  [`0ba26ae`](https://github.com/mfozmen/littlepress-ai/commit/0ba26ae4b13da2c6b19ee92aa785aa98f9f7cd5e))
 
 * feat(providers): Ollama local chat + tool use
 
@@ -4171,7 +4465,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **render**: Keep numbered snapshots so renders don't clobber
   ([#30](https://github.com/mfozmen/littlepress-ai/pull/30),
-  [`318bf3f`](https://github.com/mfozmen/littlepress-ai/commit/318bf3f585706f1ed6e7021b5a75fba35fdc61a7))
+  [`6e138e5`](https://github.com/mfozmen/littlepress-ai/commit/6e138e5ecd56f4df96543780feab0fcc6af0aa78))
 
 * feat(render): keep numbered snapshots so renders don't clobber
 
@@ -4232,7 +4526,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Auto-load PDF when its path is dragged onto the terminal
   ([#25](https://github.com/mfozmen/littlepress-ai/pull/25),
-  [`1dc05f0`](https://github.com/mfozmen/littlepress-ai/commit/1dc05f0a3957bd0225d58ba054ae7609e5c37cb2))
+  [`174a93b`](https://github.com/mfozmen/littlepress-ai/commit/174a93b5216b6ff7729c6f600ee7fa2363be5978))
 
 * feat(repl): auto-load PDF when its path is dragged onto the terminal
 
@@ -4297,7 +4591,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Claude-code-style / menu with a logical command order
   ([#26](https://github.com/mfozmen/littlepress-ai/pull/26),
-  [`7fb61a4`](https://github.com/mfozmen/littlepress-ai/commit/7fb61a406c113787b382b980745521171c6b1544))
+  [`8f65d08`](https://github.com/mfozmen/littlepress-ai/commit/8f65d0861388b7b3e11b6699ab61276012200d7a))
 
 * feat(repl): Claude-Code-style / menu with a logical command order
 
@@ -4357,7 +4651,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Hide offline picker option + catch broader Anthropic errors
   ([#20](https://github.com/mfozmen/littlepress-ai/pull/20),
-  [`2167bcc`](https://github.com/mfozmen/littlepress-ai/commit/2167bcc7eeadaad4b3b1e3cd48c6f9dfc7a018f5))
+  [`241b6b8`](https://github.com/mfozmen/littlepress-ai/commit/241b6b82a943bcc721dc85afaf6b263fa4c22b16))
 
 * fix: hide offline picker option + catch broader Anthropic errors
 
@@ -4423,7 +4717,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.0.1 [skip ci]
-  ([`990cecf`](https://github.com/mfozmen/littlepress-ai/commit/990cecf41b8a99ecc0eb2b84a2552a3e27ecb79a))
+  ([`b341ced`](https://github.com/mfozmen/littlepress-ai/commit/b341ced154947ca095f2b14cfc60698aef483d7f))
 
 
 ## v1.0.0 (2026-04-15)
@@ -4431,19 +4725,19 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 1.0.0 [skip ci]
-  ([`0c98f2d`](https://github.com/mfozmen/littlepress-ai/commit/0c98f2dde294ab9211a1ef642ac4b2bc3fec5f3b))
+  ([`9a568c9`](https://github.com/mfozmen/littlepress-ai/commit/9a568c9dc8f2e47e96905c783e0c8efdaae24cd2))
 
 ### Documentation
 
 - Mark littlepress-ai rename PR as shipped in PLAN.md
-  ([`5873448`](https://github.com/mfozmen/littlepress-ai/commit/5873448cd504342907c7715067fc3f7ebbf3e3de))
+  ([`431aa99`](https://github.com/mfozmen/littlepress-ai/commit/431aa99e3588d86400f3b46e7f45b13a4adf902e))
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 ### Features
 
 - Rename project to littlepress-ai ([#19](https://github.com/mfozmen/littlepress-ai/pull/19),
-  [`409d418`](https://github.com/mfozmen/littlepress-ai/commit/409d418d6de2921153513b9c06da21ecca6c580c))
+  [`894e4b7`](https://github.com/mfozmen/littlepress-ai/commit/894e4b72fbc91d6acb43d4894260852c25ad211a))
 
 * chore: rename project to littlepress-ai
 
@@ -4532,7 +4826,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - Consolidate slugify and refresh docs ([#17](https://github.com/mfozmen/littlepress-ai/pull/17),
-  [`365ca46`](https://github.com/mfozmen/littlepress-ai/commit/365ca46ab9aeb2f40b37a118accc76e2f1355b0f))
+  [`d5a76c4`](https://github.com/mfozmen/littlepress-ai/commit/d5a76c4a401af03a4d879775c3a5b5d9a052c6c1))
 
 * chore: consolidate slugify and refresh CLAUDE.md + README
 
@@ -4575,12 +4869,12 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **release**: 0.7.0 [skip ci]
-  ([`00886c1`](https://github.com/mfozmen/littlepress-ai/commit/00886c1e897be0eac6cc18c518217290e9bac515))
+  ([`8e0a5fd`](https://github.com/mfozmen/littlepress-ai/commit/8e0a5fdaa7c5f6c0af81916dec7f1596c19a000e))
 
 ### Documentation
 
 - Mark agent-first pivot plan as shipped
-  ([`bbcd84c`](https://github.com/mfozmen/littlepress-ai/commit/bbcd84cbd7970a104c46fa62f84ce232c047ebb5))
+  ([`056c475`](https://github.com/mfozmen/littlepress-ai/commit/056c475ffabc9811aa316096cdc830c0a8cff7a9))
 
 All five PRs (#13-#17) from docs/PLAN.md merged. Rewrite the file as a status record of what
   shipped, which earlier cleanup candidates were intentionally kept (with reasoning), and which
@@ -4594,7 +4888,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Guided API-key setup + keyring so users paste only once
   ([#18](https://github.com/mfozmen/littlepress-ai/pull/18),
-  [`1a1ec9c`](https://github.com/mfozmen/littlepress-ai/commit/1a1ec9c3bfe2b719a53fc6bcad98af6ed7527d3f))
+  [`54d2163`](https://github.com/mfozmen/littlepress-ai/commit/54d21630d7b4b8daefc5e56258fb56d07d0b9f47))
 
 * feat(repl): guided API-key setup + keyring so users paste only once
 
@@ -4656,13 +4950,13 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 0.6.0 [skip ci]
-  ([`82066f0`](https://github.com/mfozmen/littlepress-ai/commit/82066f05b2e00f917e832582d8821373c0bd0fb4))
+  ([`2887ce7`](https://github.com/mfozmen/littlepress-ai/commit/2887ce76bbfc5651332621edf93af9dcbddea87d))
 
 ### Features
 
 - **memory**: Persist the draft so the next launch resumes
   ([#16](https://github.com/mfozmen/littlepress-ai/pull/16),
-  [`82e71a3`](https://github.com/mfozmen/littlepress-ai/commit/82e71a398671396856cd00719a819ff8d69e238e))
+  [`490c510`](https://github.com/mfozmen/littlepress-ai/commit/490c51008f118165683bd77a0f05559cc4837e9b))
 
 * feat(memory): persist the draft so the next launch resumes
 
@@ -4721,13 +5015,13 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 0.5.0 [skip ci]
-  ([`715bbf4`](https://github.com/mfozmen/littlepress-ai/commit/715bbf49893a801fe1dab1c8b82312482ff13b62))
+  ([`a946de0`](https://github.com/mfozmen/littlepress-ai/commit/a946de0a57326f6fbe530c793bfa3073fe942823))
 
 ### Features
 
 - **agent**: Render_book tool — agent produces the finished PDF itself
   ([#15](https://github.com/mfozmen/littlepress-ai/pull/15),
-  [`781c52b`](https://github.com/mfozmen/littlepress-ai/commit/781c52bcd991c77505880c2a9f0738e62066ea99))
+  [`be9255d`](https://github.com/mfozmen/littlepress-ai/commit/be9255d4b221e954f831cfdc90d057fdda73d2c2))
 
 Ships PR #15 from docs/PLAN.md. Once the draft has a title (and ideally author + cover), the agent
   can call render_book itself instead of asking the user to type /render.
@@ -4756,13 +5050,13 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 0.4.0 [skip ci]
-  ([`5901df2`](https://github.com/mfozmen/littlepress-ai/commit/5901df26af9ab74488ca0bae2020392ad59d6760))
+  ([`e4d2df2`](https://github.com/mfozmen/littlepress-ai/commit/e4d2df2be7ba138b85a44626f2f70f400f795899))
 
 ### Features
 
 - **agent**: Edit tools — typo fix, metadata, cover, layout
   ([#14](https://github.com/mfozmen/littlepress-ai/pull/14),
-  [`1c28559`](https://github.com/mfozmen/littlepress-ai/commit/1c28559ebc44d2730484c9581105d57884954250))
+  [`af24010`](https://github.com/mfozmen/littlepress-ai/commit/af24010986b413e4a687b7259097bcb5c71fad49))
 
 * feat(agent): edit tools — typo fix, metadata, cover, layout
 
@@ -4821,12 +5115,12 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 0.3.0 [skip ci]
-  ([`023c5ab`](https://github.com/mfozmen/littlepress-ai/commit/023c5abef0fdd8f801e90d7231fb8a681f9194f5))
+  ([`9251ffc`](https://github.com/mfozmen/littlepress-ai/commit/9251ffc31deb9f4725ff4d9d3de8d2c0a72ab92e))
 
 ### Documentation
 
 - Replace phase files with agent-first PLAN.md
-  ([`928ec6f`](https://github.com/mfozmen/littlepress-ai/commit/928ec6f8c3ce1bd8210ae3809eb1b6bfaaa139bf))
+  ([`e708525`](https://github.com/mfozmen/littlepress-ai/commit/e7085253693ff05966cdd8f4aacb9e665ea8fd37))
 
 Drop the p0-p5 phase files that described the old slash-command-heavy roadmap. The project is
   pivoting to an agent-first CLI — the user points at a PDF, a model walks the conversation, the
@@ -4845,7 +5139,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **agent**: Tool-use agent loop with read_draft tool
   ([#13](https://github.com/mfozmen/littlepress-ai/pull/13),
-  [`af2b5fd`](https://github.com/mfozmen/littlepress-ai/commit/af2b5fd81831f80ccd608b3288b27b9164657e67))
+  [`a19ec5c`](https://github.com/mfozmen/littlepress-ai/commit/a19ec5c5a4b77da08c9f0df655a99130dbd8a284))
 
 * feat(cli): accept a PDF path positionally and auto-load it
 
@@ -4886,7 +5180,7 @@ src/providers/llm.py all 100%; total 98%. 168 tests.
 * docs: refresh stale module docstrings in repl.py and providers/llm.py
 
 Both docstrings pre-dated this PR and pointed at: - the old docs/p2-01-tool-suite-and-agent-loop.md
-  (consolidated into docs/PLAN.md in 928ec6f), and - "agent-backed behaviour lands in a follow-up
+  (consolidated into docs/PLAN.md in e708525), and - "agent-backed behaviour lands in a follow-up
   PR" / "chat() is single-turn" claims that this PR itself disproves.
 
 Rewrite both to describe the current shape: LLMProvider has chat() for quick text replies and turn()
@@ -4906,13 +5200,13 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 0.2.0 [skip ci]
-  ([`086efcc`](https://github.com/mfozmen/littlepress-ai/commit/086efcc94ec8cb3c2a275acc3defb43935cd80bd))
+  ([`740cc60`](https://github.com/mfozmen/littlepress-ai/commit/740cc60f20a21b3c8f468fd2e2676a1e7fcf011e))
 
 ### Features
 
 - **repl**: Forward non-slash input to the active LLM
   ([#12](https://github.com/mfozmen/littlepress-ai/pull/12),
-  [`17fbee4`](https://github.com/mfozmen/littlepress-ai/commit/17fbee470a226ebbce59fc09271853d2dcb22b3d))
+  [`946c565`](https://github.com/mfozmen/littlepress-ai/commit/946c56526418628f73bbf69cdf1b48ab4cbc5440))
 
 * feat(repl): forward non-slash input to the active LLM for single-turn chat
 
@@ -4965,7 +5259,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Bug Fixes
 
 - **ci**: Correct action major versions
-  ([`d42bef5`](https://github.com/mfozmen/littlepress-ai/commit/d42bef5297dd6563b171dde8fd1d08e43dbba097))
+  ([`5348f8f`](https://github.com/mfozmen/littlepress-ai/commit/5348f8f09e43232aea63db1f21fe4d0f9de53f38))
 
 actions/setup-python v7 does not exist — revert to v6 (current latest). Bump
   SonarSource/sonarqube-scan-action v6 → v7 (current latest).
@@ -4975,12 +5269,12 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Chores
 
 - **release**: 0.1.0 [skip ci]
-  ([`8c47e96`](https://github.com/mfozmen/littlepress-ai/commit/8c47e96e118f8d6279665eb3505bd21959e0aaee))
+  ([`bd6ba05`](https://github.com/mfozmen/littlepress-ai/commit/bd6ba05cae254bf0b4036b10cf8ef906865446e6))
 
 ### Continuous Integration
 
 - Bump GitHub Actions to latest major versions
-  ([`a46d0bd`](https://github.com/mfozmen/littlepress-ai/commit/a46d0bd911202fe4d5fd15291b6f4960856a0ecb))
+  ([`1563232`](https://github.com/mfozmen/littlepress-ai/commit/156323236d38e12701c542d055d64c89f669f9b5))
 
 Update actions/checkout v4→v6, actions/setup-python v5→v7, and SonarSource/sonarqube-scan-action
   v4→v6.
@@ -4989,7 +5283,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Stop running the PSR build step until we actually publish
   ([#11](https://github.com/mfozmen/littlepress-ai/pull/11),
-  [`e3dbf03`](https://github.com/mfozmen/littlepress-ai/commit/e3dbf038817ae45b105abf594ee42fe61b51bfe9))
+  [`47a5f4d`](https://github.com/mfozmen/littlepress-ai/commit/47a5f4d9a0ab6866ed46aff6024de850cf8611df))
 
 The release workflow was failing on every push to main because PSR's default build_command (python
   -m pip install build && python -m build) couldn't install into the /psr/.venv inside the action's
@@ -5010,7 +5304,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Documentation
 
 - Add SonarCloud badges and refresh README
-  ([`5905f50`](https://github.com/mfozmen/littlepress-ai/commit/5905f50287d91579403e6d2f3dee8185926cb93f))
+  ([`e22ffcc`](https://github.com/mfozmen/littlepress-ai/commit/e22ffcc6e94273020d0cd1a3d22d29dfb3373cac))
 
 Add Quality Gate, Coverage, Maintainability, Reliability, Security, and License badges linked to the
   SonarCloud project. Update the Project layout section to reflect the current tree (examples/,
@@ -5021,7 +5315,7 @@ Add Quality Gate, Coverage, Maintainability, Reliability, Security, and License 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Adopt Conventional Commits convention
-  ([`a6a79d8`](https://github.com/mfozmen/littlepress-ai/commit/a6a79d85eb8adf4f0d9ee2ae915e8c8716f3fa99))
+  ([`8693804`](https://github.com/mfozmen/littlepress-ai/commit/869380409cbca54d61b6c857aa37bcfd2642c872))
 
 Require the generating-conventional-commits skill for every commit in this repo so messages stay
   standardized and automation-friendly.
@@ -5029,7 +5323,7 @@ Require the generating-conventional-commits skill for every commit in this repo 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Allow non-English strings as test fixture input data
-  ([`0704e90`](https://github.com/mfozmen/littlepress-ai/commit/0704e90eaa3a9cc042fe051694c2c2d8ab2d1675))
+  ([`0066a2f`](https://github.com/mfozmen/littlepress-ai/commit/0066a2f7c97eb1d98052c199995ba7372bf13b78))
 
 Codify the rule the maintainer set on 2026-04-13 after review feedback confused Turkish/emoji
   fixture strings for an English-only violation. Test fixture input (Unicode content, OCR Turkish
@@ -5039,7 +5333,7 @@ Codify the rule the maintainer set on 2026-04-13 after review feedback confused 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Move roadmap into per-task files under docs/
-  ([`6340658`](https://github.com/mfozmen/littlepress-ai/commit/63406580210972dd5cdb550761f0d67770793f18))
+  ([`2382881`](https://github.com/mfozmen/littlepress-ai/commit/2382881c0273736091e5c8cbf3b05e6f89a286a4))
 
 Keep README focused on what the project is and how to use it. Move internal planning into docs/ —
   one Markdown file per open task, deleted when the task ships.
@@ -5051,7 +5345,7 @@ Phase 1 tasks drafted: image extraction, book.json synthesis, interactive gap-fi
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Pivot plan to AI-first interactive CLI
-  ([`ecd9a31`](https://github.com/mfozmen/littlepress-ai/commit/ecd9a31e42a83e9f4dccd1bf466843dccb4de3ed))
+  ([`abbb2ac`](https://github.com/mfozmen/littlepress-ai/commit/abbb2ac1e74edb93b0c6d65c847fbde5eed49c77))
 
 Replace the old Phase 1-2 task files with a new phase plan covering: packaging/zero-install launch
   (p0), REPL + provider selection (p1), tool suite + agent loop (p2), illustration generation (p3),
@@ -5061,7 +5355,7 @@ Replace the old Phase 1-2 task files with a new phase plan covering: packaging/z
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Promote conventional-commits skill to project-level
-  ([`da9c98c`](https://github.com/mfozmen/littlepress-ai/commit/da9c98c15d3b3b6f10535b70a51659d17177faad))
+  ([`ad145ff`](https://github.com/mfozmen/littlepress-ai/commit/ad145fff1513180ccb4321722cd10a284435aa70))
 
 Move generating-conventional-commits from user-level to .claude/skills/ so the repo-specific
   type-selection rules (notably: CI config is `ci:`, never `fix(ci):`) travel with the project.
@@ -5069,7 +5363,7 @@ Move generating-conventional-commits from user-level to .claude/skills/ so the r
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Reframe README around PDF-driven ingestion
-  ([`29a007e`](https://github.com/mfozmen/littlepress-ai/commit/29a007ef29804d021e803c281481a61096828ec6))
+  ([`1ca09e2`](https://github.com/mfozmen/littlepress-ai/commit/1ca09e22e43d022793f07281a67730c18b7cf8e5))
 
 The primary input is a child's draft PDF, not a hand-authored book.json. Update the tagline, add a
   "How it works" section, mark the current JSON-only flow as temporary, and preview the coming
@@ -5078,7 +5372,7 @@ The primary input is a child's draft PDF, not a hand-authored book.json. Update 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Require one branch and PR per feature or fix
-  ([`23a5e67`](https://github.com/mfozmen/littlepress-ai/commit/23a5e67ec06d923aac9d2f9a84587e3b88a38ef1))
+  ([`9df63f9`](https://github.com/mfozmen/littlepress-ai/commit/9df63f9f1addd5a2ff7c9d9d7c4ee7e1e39deb0c))
 
 Codify the branch-and-PR workflow that the maintainer adopted on 2026-04-13: no direct-to-main
   commits for production code, every
@@ -5092,7 +5386,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **cli**: Ship child-book-generator console entry point
   ([#2](https://github.com/mfozmen/littlepress-ai/pull/2),
-  [`2eba7b3`](https://github.com/mfozmen/littlepress-ai/commit/2eba7b3c213a8727992d9375729e4264cba91122))
+  [`9fbb4d5`](https://github.com/mfozmen/littlepress-ai/commit/9fbb4d5e35b63e086e782f1f273c76d617ec82f3))
 
 * feat(cli): ship child-book-generator console entry point
 
@@ -5122,7 +5416,7 @@ Also cover the previously-untested _resolve_version() fallback in src/cli.py so 
 
 * ci: align release workflow with repo's v6 action versions
 
-sonar.yml and prior CI commits (a46d0bd, d42bef5) standardized on actions/checkout@v6 and
+sonar.yml and prior CI commits (1563232, 5348f8f) standardized on actions/checkout@v6 and
   actions/setup-python@v6. The new release workflow was pinned to @v4 / @v5 — bring it in line.
 
 Addresses review feedback on #2.
@@ -5134,7 +5428,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **examples**: Add runnable example book
-  ([`9dcbc53`](https://github.com/mfozmen/littlepress-ai/commit/9dcbc53d5096b6c5abddf09534734314c9968a1e))
+  ([`31e9b22`](https://github.com/mfozmen/littlepress-ai/commit/31e9b22f6a62bee78c29c213b4d2bb3658df24b8))
 
 Adds examples/book.json plus four placeholder PNG illustrations so new users can produce a PDF
   immediately with: python build.py examples/book.json
@@ -5146,7 +5440,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **pdf-ingest**: Extract embedded images per PDF page
   ([#1](https://github.com/mfozmen/littlepress-ai/pull/1),
-  [`83dde82`](https://github.com/mfozmen/littlepress-ai/commit/83dde8286d3a09fd48db378022197e3d8f8c7319))
+  [`16a2d29`](https://github.com/mfozmen/littlepress-ai/commit/16a2d29cc9617321ef495a111daac90ea194933a))
 
 * feat(pdf-ingest): extract embedded images per PDF page
 
@@ -5174,7 +5468,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **pdf-ingest**: Extract raw page text without transforming it
-  ([`4af1934`](https://github.com/mfozmen/littlepress-ai/commit/4af1934969b394903577e11e0df21846aa255b34))
+  ([`c14e96e`](https://github.com/mfozmen/littlepress-ai/commit/c14e96e414635cd237f8779864f1c33cb0a17c93))
 
 First step of the dynamic ingestion pipeline. extract_pages(pdf_path) returns each page's text via
   pypdf, in order, with no cleaning or rewriting — honouring the preserve-child-voice contract.
@@ -5185,7 +5479,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: /load slash command ingests a PDF draft
   ([#7](https://github.com/mfozmen/littlepress-ai/pull/7),
-  [`36208d6`](https://github.com/mfozmen/littlepress-ai/commit/36208d6a12925cdd052a852c06fb2496d3f86fc9))
+  [`feb4f78`](https://github.com/mfozmen/littlepress-ai/commit/feb4f78cccfc315c1fc76e375c0d4f4b1aeb26c2))
 
 * feat(repl): /load slash command ingests a PDF draft into the session
 
@@ -5233,7 +5527,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: /pages introspection plus /title and /author metadata setters
   ([#8](https://github.com/mfozmen/littlepress-ai/pull/8),
-  [`d3c8885`](https://github.com/mfozmen/littlepress-ai/commit/d3c8885697bd9c239869d6d7f433592611c5c206))
+  [`204b7e1`](https://github.com/mfozmen/littlepress-ai/commit/204b7e17a7ca575cbb8675d331edf03c41d123e8))
 
 Add three slash commands that operate on the in-memory draft:
 
@@ -5256,7 +5550,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: /render --impose writes the A4 booklet alongside the A5
   ([#10](https://github.com/mfozmen/littlepress-ai/pull/10),
-  [`b457453`](https://github.com/mfozmen/littlepress-ai/commit/b45745345c0eda3a9293c57bd7de1cc4d199b271))
+  [`bb6924d`](https://github.com/mfozmen/littlepress-ai/commit/bb6924de8bbcfe37edee0490afebef6ac87e64da))
 
 * feat(repl): /render --impose also writes the A4 saddle-stitch booklet
 
@@ -5296,7 +5590,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: /render builds the A5 PDF from the loaded draft
   ([#9](https://github.com/mfozmen/littlepress-ai/pull/9),
-  [`62671c0`](https://github.com/mfozmen/littlepress-ai/commit/62671c06f54439908b6af955bffc77bf380f4ecb))
+  [`321ba77`](https://github.com/mfozmen/littlepress-ai/commit/321ba772b6b5625752280525910eff04712414ac))
 
 * feat(repl): /render builds the A5 PDF from the loaded draft
 
@@ -5342,7 +5636,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Interactive shell skeleton with slash-command dispatch
   ([#3](https://github.com/mfozmen/littlepress-ai/pull/3),
-  [`e1f05c7`](https://github.com/mfozmen/littlepress-ai/commit/e1f05c79b6fb86d176c95cedd7e2f1b79abaf905))
+  [`0d8ab0e`](https://github.com/mfozmen/littlepress-ai/commit/0d8ab0e1f8981765066bf1728520eb072ec9b605))
 
 * feat(repl): add interactive shell skeleton with slash-command dispatch
 
@@ -5377,7 +5671,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Persist provider choice across launches via .book-gen/session.json
   ([#5](https://github.com/mfozmen/littlepress-ai/pull/5),
-  [`4470795`](https://github.com/mfozmen/littlepress-ai/commit/4470795b3e03839b4a5a41445d80cdbdedf16a2e))
+  [`4496212`](https://github.com/mfozmen/littlepress-ai/commit/44962125d95a2b1ec8148e1af97d5b9d7945aba5))
 
 Introduce src/session.py with a small Session dataclass and atomic save/load helpers. The REPL
   accepts an optional session_root; when set, it writes the selected provider to
@@ -5403,7 +5697,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Provider picker with masked API-key entry and /model command
   ([#4](https://github.com/mfozmen/littlepress-ai/pull/4),
-  [`b7126cd`](https://github.com/mfozmen/littlepress-ai/commit/b7126cda0f88ecffa6d2dd0e394d495a4bf18dd3))
+  [`4a29045`](https://github.com/mfozmen/littlepress-ai/commit/4a290455d3335615a77101010253ea568d4fb2df))
 
 * feat(repl): provider picker with masked API-key entry and /model command
 
@@ -5445,7 +5739,7 @@ Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **repl**: Validate API keys against the provider before accepting them
   ([#6](https://github.com/mfozmen/littlepress-ai/pull/6),
-  [`4cc8965`](https://github.com/mfozmen/littlepress-ai/commit/4cc89657157402d05f75a75e447ab9635d21f5f9))
+  [`f1a25b4`](https://github.com/mfozmen/littlepress-ai/commit/f1a25b49c46d18e75388abd6ecf4e4791e51c761))
 
 * feat(repl): validate API keys against the provider before accepting them
 
@@ -5491,7 +5785,7 @@ Co-authored-by: Mehmet Fahri Özmen <mehmet.fahri@mayadem.com>
 Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - **skills**: Add select-page-layout guardrail for pixel-perfect page composition
-  ([`c0062fe`](https://github.com/mfozmen/littlepress-ai/commit/c0062fee0436491fb2f72b2afb9f5e76c6f10e5a))
+  ([`2330692`](https://github.com/mfozmen/littlepress-ai/commit/233069286d867e47fccd03641cc90cf9831dd7b0))
 
 Project-level skill codifying how a page in a child's picture book should be laid out. Works
   alongside preserve-child-voice: layout decisions never touch the child's words, only where those
@@ -5514,7 +5808,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ### Testing
 
 - Characterize existing behavior across schema, imposition, build, pdf-ingest
-  ([`3031643`](https://github.com/mfozmen/littlepress-ai/commit/303164364267f80d4b6648f28ba20fcde466c1f3))
+  ([`5ae8955`](https://github.com/mfozmen/littlepress-ai/commit/5ae8955e16606c28ffb0be23f73e1254b018e1ea))
 
 Grows the suite from 2 to 18 tests (coverage 92%):
 
