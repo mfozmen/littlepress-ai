@@ -177,7 +177,13 @@ def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        read_line=_scripted([f"/load {pdf}", "/exit"]),
+        # After ``/load`` the REPL runs the deterministic metadata
+        # prompts (title → author → series → cover → back-cover)
+        # before handing to the agent. Script the minimum accepted
+        # answers so the flow reaches the agent greeting.
+        read_line=_scripted(
+            [f"/load {pdf}", "T", "A", "n", "c", "a", "/exit"]
+        ),
         console=console,
         provider=find("anthropic"),
         session_root=tmp_path,
@@ -196,9 +202,88 @@ def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
     assert "I see 1 page" in buf.getvalue()
 
 
-def test_load_is_quiet_on_offline_provider(tmp_path):
-    """Offline (NullProvider) — /load should NOT try to talk to the
-    agent. Just load and stay silent."""
+def test_load_prints_deterministic_metadata_prompts_before_agent_turn(tmp_path):
+    """User-visible behaviour regression: after ``/load`` with a real
+    provider, the REPL must print the deterministic metadata prompts
+    (Title / Author / series / Cover / Back-cover) to the console
+    BEFORE the agent's first turn runs. This pins the core Sub-
+    project 2 user experience — asking these via plain Python is
+    what the refactor exists to do. If the wiring regresses (e.g.
+    someone reverts ``collect_metadata`` in ``_cmd_load``), this
+    test fires."""
+    import io
+
+    from rich.console import Console
+
+    from src.agent import AgentResponse
+    from src.providers.llm import find
+
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+
+    class _StubLLM:
+        def turn(self, _messages, _tools):
+            return AgentResponse(
+                content=[{"type": "text", "text": "ok"}],
+                stop_reason="end_turn",
+            )
+
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+    repl = Repl(
+        read_line=_scripted(
+            [f"/load {pdf}", "The Brave Owl", "Ece", "n", "c", "a", "/exit"]
+        ),
+        console=console,
+        provider=find("anthropic"),
+        session_root=tmp_path,
+        llm_factory=lambda _spec, _key: _StubLLM(),
+    )
+    repl.run()
+
+    out = buf.getvalue()
+    # All five prompt labels appeared (case-sensitive on the first
+    # word since Rich bolds them but doesn't touch the text).
+    assert "Title?" in out
+    assert "Author?" in out
+    assert "series" in out.lower()
+    assert "Cover?" in out
+    assert "Back-cover" in out
+    # The deterministic writes happened.
+    assert repl.draft is not None
+    assert repl.draft.title == "The Brave Owl"
+    assert repl.draft.author == "Ece"
+    assert repl.draft.cover_style == "poster"
+
+
+def test_offline_load_explains_why_metadata_prompts_skipped(tmp_path):
+    """PR #69 review finding #5: an offline user dragging a PDF onto
+    the REPL used to get no metadata prompts AND no explanation —
+    just "Loaded N pages" and then silence. A subsequent /render
+    would build a book with an empty title / default cover, which
+    looks like a bug. The REPL now prints a dim notice that names
+    the three remaining escape hatches (/title, /author, /render
+    for manual flow; /model to go online)."""
+    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
+
+    repl, buf = _make(tmp_path, [f"/load {pdf}", "/exit"])
+    repl.run()
+
+    assert repl.draft is not None
+    out = buf.getvalue().lower()
+    # Explains the skip.
+    assert "offline" in out
+    assert "skipping" in out or "skip" in out
+    # Points at the escape hatches — at least one slash command
+    # name the user can reach for.
+    assert "/title" in out or "/model" in out
+
+
+def test_load_does_not_surface_agent_errors_on_offline_provider(tmp_path):
+    """Offline (NullProvider) — /load must NOT try to talk to the
+    agent (no ``Agent error: ...`` line on stdout). The dim
+    "Offline mode — skipping the metadata prompts ..." notice IS
+    expected and is pinned by the sibling test
+    ``test_offline_load_explains_why_metadata_prompts_skipped``."""
     pdf = _write_pdf(tmp_path, [{"text": "hi"}])
 
     repl, buf = _make(tmp_path, [f"/load {pdf}", "/exit"])
@@ -339,7 +424,11 @@ def test_load_pdf_auto_ingests_image_only_pages(tmp_path):
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        read_line=_scripted([f"/load {pdf}", "/exit"]),
+        # After ``/load`` the REPL runs deterministic metadata prompts
+        # before the agent turn — script minimum answers.
+        read_line=_scripted(
+            [f"/load {pdf}", "T", "A", "n", "c", "a", "/exit"]
+        ),
         console=console,
         provider=find("anthropic"),
         session_root=tmp_path,
