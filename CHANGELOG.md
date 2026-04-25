@@ -1,6 +1,126 @@
 # CHANGELOG
 
 
+## v1.18.0 (2026-04-25)
+
+### Features
+
+- **metadata**: Localise prompts (English + Turkish, locale-detected)
+  ([#76](https://github.com/mfozmen/littlepress-ai/pull/76),
+  [`603c5a4`](https://github.com/mfozmen/littlepress-ai/commit/603c5a46f90b5208cd398e0e7be1b378d3752a52))
+
+* feat(metadata): localise prompts (English + Turkish, locale-detected)
+
+Sub-project 2 (PR #69) replaced the agent-driven upfront questions with plain Python prompts but
+  shipped them as terse English-only labels. The maintainer reported the gap during the 2026-04-25
+  live render — they were typing Turkish to the REPL and got cold single-word English questions
+  back. *"Sanırım ai sorsa soruları daha iyiydi."* The "AI-only-for-judgment" principle is a TOKEN
+  rule, not a UX rule: deterministic prompts must still localise. Memory feedback
+  ``determinism_is_not_english_only`` captures the distinction so future deterministic-replacement
+  work doesn't repeat this.
+
+New ``src/metadata_i18n.py``:
+
+- ``_TRANSLATIONS`` dict keys every metadata-prompt string with English + Turkish entries. CLAUDE.md
+  compliance: this is STRUCTURED i18n in a dedicated module (gated by recognised locale), NOT
+  scattered Turkish leaks in English flows — the shape the English-only rule was meant to prevent. -
+  ``detect_lang()`` picks the language: ``LITTLEPRESS_LANG`` env override → ``locale.getlocale()``
+  (recognises ``tr_TR`` and Windows' ``Turkish_Türkiye``) → English fallback. Locale exceptions are
+  swallowed so a startup crash here can't break ``littlepress draft.pdf`` before the user sees
+  anything. - ``t(key, lang)`` lookup with English fallback for unknown languages. A parity test
+  pins that every key has both en and tr entries — no silent half-Turkish flow.
+
+``src/metadata_prompts.py`` refactored:
+
+- Each ``collect_*`` takes an optional ``lang`` param; ``None`` resolves via ``detect_lang()``. -
+  ``collect_metadata`` resolves once at the orchestrator level and passes the same value to every
+  helper — the user can't see English and Turkish prompts mixed in one session. - y/n token sets are
+  now per-language. English mode keeps the strict English shape (PR #69 review #1: no Turkish leaks
+  in en flows); Turkish mode adds ``evet`` / ``e`` / ``hayır`` / ``h`` on top so a Turkish-typing
+  user gets native acceptance. - Phrasing widened from single-word labels to full sentences in both
+  languages (``Title?`` → ``What's the title of the book?`` / ``Kitabın adı ne?``).
+
+REPL doesn't need changes — ``collect_metadata`` is called the same way; language resolves at call
+  time.
+
+Tests:
+
+- ``tests/test_metadata_i18n.py`` (11 new) — locale detection with env override, system locale,
+  exception fallback; the English-only fallback for unknown locales / unknown lang args; the en/tr
+  parity invariant. - ``tests/test_metadata_prompts.py`` (24 → 29) — autouse fixture pins
+  ``LITTLEPRESS_LANG=en`` for the existing en-mode tests (so the dev machine's locale doesn't make
+  them flaky); 5 new Turkish tests pin Turkish prompt rendering, ``evet``/``hayır`` acceptance in tr
+  mode, Turkish menu localisation, and the orchestrator's single-language invariant. -
+  ``tests/test_repl_load.py`` updated: the integration test that pinned single-word English labels
+  now pins the topic words (``title``, ``author``, ``series``, ``cover``, ``back-cover``) in
+  lower-case, and pins ``LITTLEPRESS_LANG=en`` so the dev machine's locale doesn't break the
+  en-substring asserts.
+
+README adds a localisation bullet under the metadata-prompts section with the env-var override
+  instructions.
+
+Full suite: 715 passing (+16 new).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(i18n): address PR #76 review — CLAUDE.md carve-out, e/h hint, symmetric resolve, tighter
+  asserts
+
+All four review findings addressed.
+
+1. (score 75) CLAUDE.md not amended to ratify the i18n carve-out. The English-only rule still read
+  "nothing Turkish goes into the repo," contradicting the production Turkish strings this PR ships.
+  Added an explicit "Exception — structured i18n" bullet under Development notes that: - allows
+  locale-gated translation dicts in a dedicated module (today: ``src/metadata_i18n.py``) to carry
+  non-English UI strings as the ``tr`` value of each translation key; - reaffirms three rules —
+  non-English strings ONLY in the dict (no inline leaks), every key must have an ``en`` entry, and
+  ``detect_lang()`` falls back to English on unknown locales so the global audience never sees
+  gibberish. The original rule's wording is preserved as the default ("English by default") with the
+  carve-out as the documented exception, mirroring the existing test-fixture exception shape.
+
+2. (score 50) Turkish series prompt advertised ``(y/n)`` while the tr token set accepted ``evet`` /
+  ``e`` / ``hayır`` / ``h``. A Turkish-typing user got accepted on ``evet`` even though the
+  displayed hint never told them that was valid. Fix: changed the tr translation to ``(e/h)`` to
+  match the localised token set. New regression test
+  ``test_collect_series_turkish_prompt_advertises_e_h_not_y_n`` pins both halves: ``(e/h)`` is in
+  the printed prompt; ``(y/n)`` isn't (sanity that the en hint doesn't bleed through).
+
+3. (score 25) ``_resolve_lang`` returned non-None input as-is, which let an unsupported value
+  (``lang="fr"``) bypass the "unknown → English" contract that ``detect_lang()`` enforces. No
+  production caller does this today, but the architectural asymmetry would bite a future
+  contributor. Symmetric fix: ``return lang if lang in _SUPPORTED else detect_lang()``.
+
+4. (score 50) Integration test in ``tests/test_repl_load.py`` weakened single-word topic asserts
+  (``"title" in out``) that could pass via incidental REPL output. Tightened to the actual localised
+  English prompt phrasings (``"what's the title of the book"``, ``"who's the author"``, ``"is this
+  book part of a series"``, ``"how would you like the cover"``, ``"back-cover blurb"``). If those
+  wordings change, the test now fails loudly so the next maintainer updates either the translation
+  or the assertion deliberately.
+
+Full suite: 716 passing (+1 new regression test).
+
+* test(i18n): regression for _resolve_lang fall-through (PR #76 r2 #1)
+
+Round-2 review observation: the F3 fix (``_resolve_lang`` falling through to ``detect_lang()`` for
+  unsupported lang codes) was correctly implemented at ``src/metadata_prompts.py:82-95`` but had no
+  dedicated regression test. CLAUDE.md TDD discipline says bug fixes start with a regression test
+  that reproduces the bug.
+
+New ``test_resolve_lang_normalises_unsupported_to_detected_default``:
+
+* Patches ``detect_lang`` to return ``"en"`` deterministically (the dev machine's locale is Turkish,
+  so without the patch ``_resolve_lang("fr")`` would land on ``"tr"`` here and pass by accident). *
+  Pins fall-through for three unsupported shapes (``"fr"``, ``"klingon"``, ``""``). * Pins
+  pass-through for supported codes (``"en"``, ``"tr"``). * Pins the ``None`` path resolves via
+  ``detect_lang`` directly (not via the fall-through branch).
+
+Full suite: 717 passing.
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.17.1 (2026-04-25)
 
 ### Bug Fixes
@@ -140,6 +260,11 @@ Full suite: 697 passing.
 ---------
 
 Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.17.1 [skip ci]
+  ([`e72497d`](https://github.com/mfozmen/littlepress-ai/commit/e72497d2b4c2f81daf64d45b648ed43a1a50e848))
 
 
 ## v1.17.0 (2026-04-24)
