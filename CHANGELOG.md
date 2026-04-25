@@ -1,6 +1,147 @@
 # CHANGELOG
 
 
+## v1.17.1 (2026-04-25)
+
+### Bug Fixes
+
+- **layouts**: Protect MIXED-default text-only pages in propose_layouts
+  ([#74](https://github.com/mfozmen/littlepress-ai/pull/74),
+  [`880b3c7`](https://github.com/mfozmen/littlepress-ai/commit/880b3c75b51933dba557c2b82bd371c6fc418096))
+
+* fix(layouts): protect MIXED-default text-only pages in propose_layouts
+
+The Yavru Dinozor v3 render (2026-04-25) duplicated the handwritten text on every story page — once
+  inside the Samsung-Notes scan image and once as the OCR'd text block under it. PR #67 was supposed
+  to prevent this by defaulting MIXED-classified pages to ``layout=text-only`` while keeping
+  ``page.image`` attached, but ``propose_layouts`` then proactively flipped those pages to
+  ``image-top`` / ``image-bottom`` / ``image-full`` after the agent's greeting, undoing the default.
+
+Fix: ``_reject_layout_batch`` now treats the
+
+``layout=text-only AND page.image is not None`` shape as a protected MIXED-default signature. A
+  non-MIXED text-only page has no image attached, so this shape only ever appears after a
+  ``<MIXED>`` ingestion — there's no false-positive risk. The whole batch is rejected when it tries
+  to flip any protected page to a non-text-only layout, with a message naming the protected pages
+  and pointing at ``choose_layout`` as the explicit-override escape hatch (per-page, not gated by
+  this protection).
+
+``propose_layouts``'s tool description now flags the rule upfront so the agent doesn't have to
+  discover it from a rejection message.
+
+Tests:
+
+- ``test_propose_layouts_protects_mixed_default_text_only_pages`` — three-page draft, two
+  MIXED-defaulted (text-only + image-attached), one image-top. Batch tries to flip all three to
+  image-*. Expected: rejection naming pages 1 and 2, no mutation, message points at
+  ``choose_layout``. - ``test_propose_layouts_allows_keeping_mixed_default_pages_as_text_only`` —
+  counterpart that confirms the protection only fires on flips, not on legitimate batches that
+  respect the default.
+
+Full suite: 699 passing (+2).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(layouts): address PR #74 review — broaden protection framing, tighten assertions
+
+Three review findings tied to the same false claim ("only MIXED ingestion produces
+  ``layout=text-only AND image is not None``") plus two cleanup nits.
+
+Findings #1, #2, #3 (all score 100). Reviewer pointed out the claim is wrong: two non-MIXED paths
+  reach the same shape:
+
+* ``choose_layout(layout='text-only')`` on an image-bearing page is permitted by the per-page tool —
+  its only check rejects ``image-*`` on imageless pages, not the reverse. *
+  ``generate_page_illustration`` sets ``page.image`` and only sets ``page.layout`` when the optional
+  ``layout`` arg is passed; calling without ``layout`` on a previously ``<TEXT>``-classified page
+  leaves the protected signature.
+
+The protection LOGIC is still right — refusing to silently flip a page in that shape is correct in
+  all three origin paths, because in every case the user did not request an image-* layout and a
+  batch flip would surprise them. Only the JUSTIFICATION needed reframing.
+
+Reframed across three surfaces:
+
+* ``_reject_layout_batch`` comment: enumerates the three legitimate origin paths and notes the
+  per-page ``choose_layout`` escape hatch isn't gated. * Rejection message: "intentionally text-only
+  with an image attached" replaces "MIXED-classified", with a short note that MIXED ingestion is the
+  most-common origin but not the only one. * ``propose_layouts`` tool description: same reframing so
+  the agent learns the rule's full scope upfront. * Test docstring on
+  ``test_propose_layouts_protects_intentional_text_only_with_image`` (renamed from
+  ``...mixed_default_text_only_pages``) explains all three origins.
+
+Finding #4 (score 75) — Turkish "Yavru Dinozor" in the test docstring stripped; replaced with "the
+  v3 Samsung-Notes render" (language-neutral; same meaning).
+
+Finding #5 (score 50) — Loose assertion ``"1" in result and "2" in result`` would have matched any
+  rejection mentioning a digit, including the pre-existing imageless-page check. Tightened to
+  ``"page(s) 1, 2" in result`` (exact substring the rejection message produces) plus a uniqueness
+  check on the new wording ``"intentionally text-only"`` so the test pins THIS branch specifically.
+
+The companion "allows-keeping" test renamed (...``mixed_default_pages``... →
+  ...``protected_pages``...) for consistency with the broader protection framing.
+
+Full suite: 699 passing.
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- **repl**: Ctrl-c at the prompt now exits the app cleanly
+  ([#75](https://github.com/mfozmen/littlepress-ai/pull/75),
+  [`f3ac289`](https://github.com/mfozmen/littlepress-ai/commit/f3ac289ba86025afbca6dfad90130d895b0d782b))
+
+* fix(repl): Ctrl-C at the prompt now exits the app cleanly
+
+Reported by the maintainer during the 2026-04-25 review session: ``Ctrl-C`` at the main prompt
+  cleared the current line and re-prompted instead of exiting — exit required ``Ctrl-D`` (EOF) or
+  ``/exit``. The earlier behaviour was modelled on Claude Code / most shells, but the maintainer
+  found it trapping in practice and the standard "Ctrl-C exits the app" mental model fits a
+  task-oriented CLI like Littlepress better (there's rarely a half-typed line worth preserving).
+
+The fix: ``_read_loop``'s ``KeyboardInterrupt`` branch now ``return 0`` instead of ``continue``. A
+  trailing newline keeps the terminal's echoed ``^C`` from sharing a line with whatever gets printed
+  after.
+
+Regression test rewrites the prior pin (which encoded the OLD behaviour) —
+  ``test_ctrl_c_at_prompt_exits_cleanly`` script feeds one ``KeyboardInterrupt`` and a follow-up
+  entry that should NEVER be read; ``run()`` must return 0 immediately and the follow-up entry must
+  remain in the script list afterwards.
+
+PLAN entry trimmed.
+
+Full suite: 697 passing (this branch is off ``main`` so PR #74's +2 propose-layouts protection tests
+  aren't here yet).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(repl): symmetric EOF assertion (PR #75 review #1)
+
+Reviewer flagged that ``test_eof_exits_cleanly`` couldn't distinguish "exit on EOF" from "exit after
+  the read failed and something else hit the loop" — the test fed ``[]`` so any path that exits via
+  the empty-script ``IndexError → EOFError`` fallback would also pass. The new
+  ``test_ctrl_c_at_prompt_exits _cleanly`` correctly pins both invariants on the Ctrl-C side (return
+  0 AND second scripted line not consumed); EOF deserves the same parity.
+
+New test ``test_eof_at_prompt_exits_cleanly_and_consumes_no_ further_input`` feeds ``[EOFError,
+  "should-never-be-read"]`` and asserts ``run() == 0`` plus the second entry remains in the script
+  list.
+
+Findings #2 (no farewell on Ctrl-C exit) and #4 (Turkish ``evet`` token in ``confirm()``)
+  deliberately not addressed:
+
+* #2 is a design call (the abrupt exit is intentional for a task-oriented CLI; PR description
+  already documents it). Score 25, no actual regression. * #4 is out-of-scope for this PR — the line
+  is pre-existing and not modified here. Logging it as a follow-up plan entry in a separate docs
+  commit on main.
+
+Full suite: 697 passing.
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.17.0 (2026-04-24)
 
 ### Chores
@@ -53,6 +194,9 @@ Before this commit: 115 Mehmet Fahri Özmen <mehmetfahriozmen@gmail.com> 71 Mehm
   level.)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- **release**: 1.17.0 [skip ci]
+  ([`73546bf`](https://github.com/mfozmen/littlepress-ai/commit/73546bff33325d2c2cd15bcb5f460d18d09df6b1))
 
 ### Documentation
 
