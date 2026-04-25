@@ -2728,25 +2728,27 @@ def test_propose_layouts_enforces_text_only_for_imageless_pages():
 
 
 
-def test_propose_layouts_protects_mixed_default_text_only_pages(tmp_path):
-    """Regression for the Yavru Dinozor v3 finding: ingestion
-    correctly classified Samsung-Notes pages as ``<MIXED>`` and set
+def test_propose_layouts_protects_intentional_text_only_with_image(tmp_path):
+    """Regression for the v3 Samsung-Notes render finding: ingestion
+    correctly classified the pages as ``<MIXED>`` and set
     ``layout=text-only`` while keeping ``page.image`` attached (the
     PR #67 fix to the duplicate-text bug). The agent then proactively
     called ``propose_layouts`` after the greeting; ``propose_layouts``
     saw image-attached pages and promoted them to ``image-*``
-    layouts, undoing the MIXED default. The rendered book duplicated
-    the handwritten text — once baked into the image, once as the
+    layouts, undoing the default. The rendered book duplicated the
+    handwritten text — once baked into the image, once as the
     transcribed text block under it.
 
     Fix: ``propose_layouts`` treats ``layout=text-only AND image is
-    not None`` as a protected MIXED-default signature (uniquely so —
-    a non-MIXED text-only page has no image attached, so this shape
-    only ever appears after a MIXED ingestion). Any batch that tries
-    to flip a protected page to a non-text-only layout is rejected
-    with a message naming the protected pages so the agent knows to
-    either keep them text-only or call ``choose_layout`` per-page
-    when the user explicitly wants the drawing back in.
+    not None`` as an intentional text-only-with-image and refuses
+    to flip those pages to non-text-only in a batch. The signature
+    has three legitimate origins (MIXED ingestion, an explicit
+    ``choose_layout`` to text-only on an image-bearing page, and
+    ``generate_page_illustration`` without a layout override on a
+    previously ``<TEXT>``-classified page); in every case the
+    user did NOT request an image-* layout, so the batch tool
+    must not introduce one silently. Per-page ``choose_layout``
+    is the explicit-override path the rejection message points at.
     """
     from src.agent_tools import propose_layouts_tool
     from src.draft import Draft, DraftPage
@@ -2783,23 +2785,29 @@ def test_propose_layouts_protects_mixed_default_text_only_pages(tmp_path):
     assert draft.pages[0].layout == "text-only"
     assert draft.pages[1].layout == "text-only"
     assert draft.pages[2].layout == "image-top"
-    # Rejection message names the protected pages.
-    assert "1" in result and "2" in result
-    assert (
-        "mixed" in result.lower()
-        or "text-only" in result.lower()
-        or "protected" in result.lower()
-    )
-    # And points at choose_layout as the explicit-override escape
-    # hatch so the agent knows what to do next.
+    # Rejection message names BOTH protected pages in a list shape
+    # the renderer produces (``page(s) 1, 2``). Pinning the exact
+    # substring avoids the prior loose-match failure mode the
+    # reviewer flagged: ``"1" in result and "2" in result`` would
+    # also accept any unrelated rejection that happened to include
+    # a ``Page 1`` / ``Page 2`` mention.
+    assert "page(s) 1, 2" in result
+    # And the message must distinguish itself from other rejection
+    # paths (imageless-page check, range check, etc.) — the
+    # "intentionally text-only with an image attached" wording is
+    # unique to this branch.
+    assert "intentionally text-only" in result.lower()
+    # Points at choose_layout as the explicit-override escape hatch
+    # so the agent knows what to do next.
     assert "choose_layout" in result
 
 
-def test_propose_layouts_allows_keeping_mixed_default_pages_as_text_only(tmp_path):
+def test_propose_layouts_allows_keeping_protected_pages_as_text_only(tmp_path):
     """Counterpart to the protection: when the proposal explicitly
-    keeps a MIXED-default page as text-only, the batch must apply
-    cleanly. The protection only fires on attempts to FLIP the
-    layout, not on legitimate batches that respect the default."""
+    keeps an intentional text-only-with-image page as text-only,
+    the batch must apply cleanly. The protection only fires on
+    attempts to FLIP the layout, not on legitimate batches that
+    respect the existing state."""
     from src.agent_tools import propose_layouts_tool
     from src.draft import Draft, DraftPage
 

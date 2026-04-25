@@ -1838,17 +1838,20 @@ def propose_layouts_tool(
             "Use this right after metadata is settled. For surgical "
             "tweaks afterwards, use choose_layout. Valid layouts: "
             "image-top, image-bottom, image-full, text-only. Pages "
-            "without a drawing must be text-only. ALSO: pages that "
-            "ingestion has placed in the (layout=text-only AND image "
-            "is not None) shape are MIXED-default pages (Samsung "
-            "Notes / phone scans where text and drawing are baked on "
-            "the same pixel canvas) and MUST stay text-only in this "
-            "batch — flipping them to image-* would print the "
-            "handwritten text twice (once inside the image, once as "
-            "the transcribed text block). The whole batch is "
-            "rejected if any of those pages is flipped. Use "
-            "choose_layout per-page if the user explicitly asks to "
-            "see the drawing on a MIXED page. "
+            "without a drawing must be text-only. ALSO: a page in "
+            "the (layout=text-only AND image is not None) shape is "
+            "an intentional text-only-with-image — usually a MIXED "
+            "ingestion (Samsung Notes / phone scans where text and "
+            "drawing are baked on the same pixel canvas), but the "
+            "same shape also follows an explicit choose_layout to "
+            "text-only or a generate_page_illustration call without "
+            "a layout override. In all three cases this batch tool "
+            "MUST keep them text-only — flipping them would either "
+            "print the handwritten text twice (MIXED) or undo an "
+            "explicit user choice. The whole batch is rejected if "
+            "any of those pages is flipped. Use choose_layout per-"
+            "page if the user explicitly asks to see the drawing on "
+            "such a page. "
             + _RHYTHM_RULES_FOR_TOOL_DESC
             + " Since you see every page at once here, use that view "
             "to make the cadence feel varied on paper."
@@ -1905,16 +1908,29 @@ def _reject_layout_batch(draft: Draft, items: list[dict]) -> str | None:
                 f"Page {page_n} has no drawing — it must be text-only. "
                 "Can't apply image-* layouts to an imageless page."
             )
-        # MIXED-default protection: a page in the
-        # ``layout=text-only AND image is not None`` shape was
-        # placed there by the ingestion's ``<MIXED>`` branch (the
-        # PR #67 fix to the duplicate-text bug — Samsung Notes pages
-        # have text baked into the image, so showing the image AND
-        # the transcribed text would print the content twice). The
-        # only way to hit this shape is via MIXED ingestion; a
-        # non-MIXED text-only page has no image attached. Refuse to
-        # silently flip it back to image-* — the user has to
-        # explicitly opt the drawing back in via choose_layout.
+        # Intentional-text-only-with-image protection: refuse to
+        # silently flip a page in the
+        # ``layout=text-only AND image is not None`` shape to a
+        # non-text-only layout. This signature appears in three
+        # legitimate cases, and in all three the user did not ask
+        # for an image-* layout — so flipping via the batch tool
+        # would surprise them:
+        #
+        #   1. MIXED ingestion (the PR #67 fix to the Samsung Notes
+        #      duplicate-text bug — text baked into the image, so
+        #      showing image + transcription prints content twice).
+        #   2. ``choose_layout(page=N, layout='text-only')`` called
+        #      explicitly on an image-bearing page (the per-page
+        #      tool allows this; the user kept the drawing on disk
+        #      but chose not to render it).
+        #   3. ``generate_page_illustration`` invoked without the
+        #      optional ``layout`` arg on a previously
+        #      ``<TEXT>``-classified page (image=None,
+        #      layout=text-only) — the new image lands but the
+        #      layout doesn't auto-flip.
+        #
+        # In every case the explicit-override path is per-page
+        # ``choose_layout``, which isn't gated by this rule.
         if (
             page.layout == "text-only"
             and page.image is not None
@@ -1925,14 +1941,14 @@ def _reject_layout_batch(draft: Draft, items: list[dict]) -> str | None:
         listed = ", ".join(str(p) for p in protected_flipping)
         return (
             f"Refusing to flip page(s) {listed} away from text-only — "
-            f"these are MIXED-classified pages (text + image baked "
-            f"on the same canvas). Promoting them to image-* would "
-            f"print the handwritten text twice (once inside the "
-            f"image, once as the transcribed text block). If the "
-            f"user explicitly asks to see the drawing on those pages, "
-            f"call choose_layout(page=N, layout='image-top') per "
-            f"page rather than batching them — the per-page tool "
-            f"isn't gated by this protection."
+            f"these pages are intentionally text-only with an image "
+            f"attached (most often a MIXED-ingestion result, but "
+            f"also possible after explicit choose_layout or after "
+            f"generate_page_illustration without a layout override). "
+            f"Promoting them to image-* in a batch would surprise "
+            f"the user; call choose_layout(page=N, layout='image-top') "
+            f"per page if the user explicitly asks to see the drawing — "
+            f"the per-page tool isn't gated by this protection."
         )
     return None
 
