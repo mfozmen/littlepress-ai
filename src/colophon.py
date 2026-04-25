@@ -2,10 +2,11 @@
 transcribed text is actually book metadata (colophon, credits,
 dedication, copyright).
 
-Reported during the 2026-04-25 Yavru Dinozor live render: page 5
-was a Samsung Notes colophon (``YAZAR:POYRAZ RESİMLEYEN:POYRAZ``)
-but the pipeline rendered it as a regular interior story page.
-This module classifies all transcribed pages in one LLM round-trip
+Reported during the 2026-04-25 live render: a Samsung Notes
+export had a colophon page (an "AUTHOR: ... ILLUSTRATOR: ..."
+block, the kind of credits page the pipeline shouldn't treat as
+story content) and rendered it as a regular interior page. This
+module classifies all transcribed pages in one LLM round-trip
 and flips ``page.hidden`` on the metadata pages so they don't
 reach the renderer.
 
@@ -81,10 +82,19 @@ def detect_colophon_pages(
     """
     if isinstance(llm_provider, NullProvider):
         return []
+    # Filter to non-hidden pages with actual transcribed text.
+    # Skipping empty-text pages handles two cases (PR #78 review
+    # #3 + #4): (i) OCR ingestion failed on them — sending an empty
+    # ``Page N: `` to the LLM would waste a round-trip and risk
+    # the model classifying empty entries as metadata-shaped; and
+    # (ii) image-only pages that haven't been OCR'd yet — same
+    # logic. The orchestrator stays defensive: if every page is
+    # empty (worst-case OCR-completely-failed), we don't call the
+    # LLM at all rather than gating on the upstream failure.
     candidates = [
         (idx, page)
         for idx, page in enumerate(draft.pages, start=1)
-        if not page.hidden
+        if not page.hidden and page.text.strip()
     ]
     if not candidates:
         return []
@@ -137,8 +147,17 @@ def _parse_reply(reply: str) -> list[int]:
 
     Returns ``[]`` for ``<NONE>``, unrecognised replies, and any
     block whose contents don't include positive integers. Dedupes
-    repeated entries (preserving first-seen order)."""
+    repeated entries (preserving first-seen order).
+
+    Hedging models occasionally emit BOTH a ``<NONE>`` marker and a
+    ``<COLOPHON>`` block in the same reply (PR #78 review #2). When
+    that happens the negative signal wins — the conservative call
+    is "no metadata pages, render everything." A user can always
+    ``hide_page`` in the review turn if a colophon got missed.
+    """
     if not reply:
+        return []
+    if _NONE_RE.search(reply):
         return []
     block_match = _BLOCK_RE.search(reply)
     if block_match is None:

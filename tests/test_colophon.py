@@ -1,12 +1,11 @@
 """Colophon detection — auto-hide story-shaped pages whose text is
 actually book metadata (colophon, credits, dedication, copyright).
 
-Reported during the 2026-04-25 Yavru Dinozor live render: page 5
-of the Samsung Notes export read ``YAZAR:POYRAZ RESİMLEYEN:POYRAZ``
-— a colophon, not a story page — but ingestion treated it as
-regular interior text and rendered it on its own page instead of
-hiding it. User's framing: *"kapata olmalıydı bu yazılar … yapay
-zeka bunları ayırt etmeli."*
+Reported during the 2026-04-25 live render: a Samsung Notes export
+had a credits page (an "AUTHOR: ... ILLUSTRATOR: ..." block) that
+ingestion treated as regular interior text and rendered as a
+story page instead of hiding it. The user expected the AI to tell
+metadata pages apart from story pages.
 
 This module classifies transcribed pages as story vs metadata in
 one LLM round-trip and auto-hides the metadata pages. Author /
@@ -289,6 +288,73 @@ def test_detect_colophon_pages_ignores_out_of_range_page_numbers(tmp_path):
     assert detected == []
     assert draft.pages[0].hidden is False
     assert draft.pages[1].hidden is False
+
+
+def test_parse_reply_none_marker_wins_over_colophon_block(tmp_path):
+    """PR #78 review #2: hedging models occasionally emit both a
+    ``<NONE>`` marker and a ``<COLOPHON>`` block in the same reply
+    ("there are no metadata pages, but in case I'm wrong, here's a
+    block"). The negative signal must win — false positives on
+    auto-hide cost the user a missing story page; missing a
+    colophon costs at most one ``hide_page`` call in the review
+    turn. Pin the conservative behaviour so a future regex tweak
+    can't silently flip the precedence."""
+    from src.colophon import _parse_reply
+
+    hedged = "<NONE>\n<COLOPHON>\n5\n</COLOPHON>"
+    assert _parse_reply(hedged) == []
+
+
+def test_detect_colophon_pages_skips_empty_text_pages(tmp_path):
+    """PR #78 review #4: empty-text pages (OCR failed, or image-
+    only-not-yet-OCR'd) must NOT be enumerated in the colophon
+    prompt. The LLM might classify an empty entry as metadata-
+    shaped (no story text → looks like a colophon)."""
+    from src.colophon import detect_colophon_pages
+
+    draft = _draft_with_text(
+        tmp_path,
+        [
+            ("", False),                          # empty (OCR failed?)
+            ("Story page 2.", False),
+            ("YAZAR:Poyraz", False),
+            ("   ", False),                       # whitespace-only
+        ],
+    )
+    llm = _ScriptedLLM(["<COLOPHON>\n3\n</COLOPHON>"])
+
+    detected = detect_colophon_pages(draft, llm, _console())
+
+    assert detected == [3]
+    # Prompt only included pages with actual text — pages 2 and 3.
+    msg = llm.calls[0]["messages"][0]["content"]
+    assert "Story page 2" in msg
+    assert "Poyraz" in msg
+    # Empty-text pages weren't listed.
+    assert "Page 1:" not in msg
+    assert "Page 4:" not in msg
+
+
+def test_detect_colophon_pages_no_op_when_every_page_has_empty_text(tmp_path):
+    """PR #78 review #3: if OCR ingestion hard-failed, every page
+    has empty text. The detector must short-circuit before the LLM
+    call rather than waste a round-trip on empty bodies (which
+    would also risk the model classifying empty entries as
+    metadata-shaped)."""
+    from src.colophon import detect_colophon_pages
+
+    draft = _draft_with_text(
+        tmp_path,
+        [("", False), ("", False), ("   ", False)],
+    )
+    llm = _ScriptedLLM([])  # no replies — would crash if called
+
+    detected = detect_colophon_pages(draft, llm, _console())
+
+    assert detected == []
+    assert llm.calls == [], (
+        "no LLM call should fire when all pages are empty-text"
+    )
 
 
 def test_detect_colophon_pages_prompt_lists_pages_with_numbers(tmp_path):
