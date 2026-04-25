@@ -251,15 +251,19 @@ def test_load_prints_deterministic_metadata_prompts_before_agent_turn(
     repl.run()
 
     out = buf.getvalue().lower()
-    # All five prompt topics appeared. After the warmth refactor the
-    # phrasings are full sentences ("What's the title of the book?")
-    # rather than single-word labels, so assertions match the topic
-    # word instead of an exact label.
-    assert "title" in out
-    assert "author" in out
-    assert "series" in out
-    assert "cover" in out
-    assert "back-cover" in out or "blurb" in out
+    # PR #76 review finding #4: pin the actual localised prompt
+    # phrasings, not bare topic words. Single-word matches like
+    # ``"title" in out`` could pass via incidental REPL output (the
+    # agent's reply, the draft summary, etc.). The exact phrasings
+    # below are the ``en`` translations from
+    # ``src/metadata_i18n.py``; if those wordings change, this
+    # test fails loudly and the next maintainer updates either the
+    # translation or the assertion deliberately.
+    assert "what's the title of the book" in out
+    assert "who's the author" in out
+    assert "is this book part of a series" in out
+    assert "how would you like the cover" in out
+    assert "back-cover blurb" in out
     # The deterministic writes happened.
     assert repl.draft is not None
     assert repl.draft.title == "The Brave Owl"

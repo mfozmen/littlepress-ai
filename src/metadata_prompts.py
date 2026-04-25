@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from rich.console import Console
 
 from src.draft import Draft
-from src.metadata_i18n import detect_lang, t
+from src.metadata_i18n import _SUPPORTED, detect_lang, t
 
 ReadLine = Callable[[], str]
 
@@ -80,7 +80,19 @@ _NO_TOKENS: dict[str, frozenset[str]] = {
 
 
 def _resolve_lang(lang: str | None) -> str:
-    return lang if lang is not None else detect_lang()
+    """Normalise ``lang`` to a supported code or fall back to
+    ``detect_lang()``. Symmetric with ``detect_lang()``'s own
+    "unknown locale → English" contract: a caller passing
+    ``lang="fr"`` (or any other unsupported value) gets the
+    detected default rather than a string that would force every
+    ``t()`` lookup down the English fallback path with a quietly
+    inconsistent locale tag floating through. PR #76 review
+    finding #3."""
+    if lang is None:
+        return detect_lang()
+    if lang in _SUPPORTED:
+        return lang
+    return detect_lang()
 
 
 def _prompt_nonempty(prompt: str, read_line: ReadLine, console: Console) -> str:

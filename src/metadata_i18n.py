@@ -50,7 +50,13 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     # --- series ----------------------------------------------------
     "series.prompt": {
         "en": "[bold]Is this book part of a series?[/bold] (y/n)",
-        "tr": "[bold]Bu kitap bir serinin parçası mı?[/bold] (y/n)",
+        # Match the hint to the tokens the tr y/n set actually
+        # accepts — ``evet`` / ``e`` / ``hayır`` / ``h`` (plus
+        # ``y`` / ``yes`` / ``n`` / ``no`` for forgiveness, but
+        # those don't need to be advertised in tr mode). The
+        # English ``(y/n)`` would tell a Turkish-typing user they
+        # have to switch to English keys.
+        "tr": "[bold]Bu kitap bir serinin parçası mı?[/bold] (e/h)",
     },
     "series.volume_prompt": {
         "en": "[bold]Which volume is this? (positive integer)[/bold]",

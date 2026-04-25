@@ -465,6 +465,33 @@ def test_collect_title_prompts_in_turkish_when_lang_is_tr(tmp_path):
     assert "Kitabın" in out and "adı" in out
 
 
+def test_collect_series_turkish_prompt_advertises_e_h_not_y_n(tmp_path):
+    """PR #76 review #2: the Turkish series prompt used to print
+    ``(y/n)`` while accepting ``evet`` / ``e`` / ``hayır`` / ``h``
+    natively — a Turkish-typing user got accepted on ``evet`` even
+    though the hint never told them that was a valid answer. Fix:
+    Turkish prompt now reads ``(e/h)`` to match the localised token
+    set."""
+    from src.metadata_prompts import collect_series
+
+    draft = _empty_draft(tmp_path)
+    draft.title = "A"
+    buf = io.StringIO()
+    console = Console(
+        file=buf, force_terminal=False, width=100, no_color=True
+    )
+    # ``e`` = evet (yes); follow-up volume number then ends the
+    # prompt cycle. The point of the test is the displayed hint,
+    # not the path through the volume sub-prompt.
+    collect_series(draft, _scripted(["e", "1"]), console, lang="tr")
+
+    out = buf.getvalue()
+    # Hint matches what the tr token set advertises.
+    assert "(e/h)" in out
+    # Sanity: the en hint shape isn't bleeding through.
+    assert "(y/n)" not in out
+
+
 def test_collect_series_accepts_evet_in_turkish_mode(tmp_path):
     """In Turkish mode the y/n tokens widen to include ``evet`` /
     ``e`` (yes) and ``hayır`` / ``h`` (no), matching what a
