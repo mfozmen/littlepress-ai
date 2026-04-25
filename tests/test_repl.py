@@ -34,12 +34,19 @@ def test_slash_exit_returns_zero():
     assert repl.run() == 0
 
 
-def test_ctrl_c_cancels_the_current_line_and_reprompts():
-    """Ctrl-C at the main prompt should wipe the current input and let
-    the user type again — same feel as Claude Code / most shells.
-    Exiting only happens on Ctrl-D (EOF) or /exit."""
+def test_ctrl_c_at_prompt_exits_cleanly():
+    """Ctrl-C at the main prompt exits the REPL with code 0. The
+    earlier behaviour (clear-the-line and re-prompt) was modelled on
+    Claude Code / most shells, but the maintainer reported during
+    the 2026-04-25 review that it trapped them in the session — the
+    standard "Ctrl-C exits the app" mental model wins for a task-
+    oriented CLI like Littlepress where there's rarely a half-typed
+    line worth preserving. The test simulates a single ``KeyboardInterrupt``
+    at the read prompt and expects ``run()`` to return ``0`` without
+    needing a follow-up ``/exit`` line — the second item in the
+    scripted list would never be read if the fix is in place."""
 
-    lines = [KeyboardInterrupt, "/exit"]
+    lines = [KeyboardInterrupt, "should-never-be-read"]
 
     def read():
         head = lines.pop(0)
@@ -51,12 +58,40 @@ def test_ctrl_c_cancels_the_current_line_and_reprompts():
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(read_line=read, console=console, provider=find("none"))
 
-    assert repl.run() == 0  # clean exit via /exit after the ^C
-
-
-def test_eof_exits_cleanly():
-    repl, _ = _make([])
     assert repl.run() == 0
+    # Second scripted entry never consumed — the loop exited on the
+    # first ``KeyboardInterrupt``, not after the line-clear-and-retry.
+    assert lines == ["should-never-be-read"], (
+        f"Ctrl-C should have exited immediately; remaining script: {lines!r}"
+    )
+
+
+def test_eof_at_prompt_exits_cleanly_and_consumes_no_further_input():
+    """Symmetric pin to ``test_ctrl_c_at_prompt_exits_cleanly``: EOF
+    (Ctrl-D) must also exit immediately with code 0 and not consume
+    any later scripted input. PR #75 review #1: the prior
+    ``test_eof_exits_cleanly`` only fed ``[]`` so it couldn't
+    distinguish "exit on EOF" from "exit after the read failed and
+    something else hit the loop"; this test feeds a ``should-never-
+    be-read`` follow-up entry to assert the loop bails on the EOF
+    itself."""
+
+    lines = [EOFError, "should-never-be-read"]
+
+    def read():
+        head = lines.pop(0)
+        if head is EOFError:
+            raise EOFError
+        return head
+
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+    repl = Repl(read_line=read, console=console, provider=find("none"))
+
+    assert repl.run() == 0
+    assert lines == ["should-never-be-read"], (
+        f"EOF should have exited immediately; remaining script: {lines!r}"
+    )
 
 
 def test_help_lists_available_commands():
