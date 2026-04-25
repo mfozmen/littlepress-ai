@@ -1,7 +1,134 @@
 # CHANGELOG
 
 
+## v1.19.0 (2026-04-25)
+
+### Chores
+
+- **repl**: Strip Turkish tokens from cost-confirm gate
+  ([#77](https://github.com/mfozmen/littlepress-ai/pull/77),
+  [`a26be8b`](https://github.com/mfozmen/littlepress-ai/commit/a26be8b06219521dc3d91f1590abae8b1de46664))
+
+Reported as out-of-scope on PR #75 review #4 and noted as a follow-up: ``Repl._confirm`` accepted
+  ``"y", "yes", "evet", "e"``
+
+even though its prompt prints in English (``(y/n)``). The Turkish tokens were a stray inline leak —
+  exactly the shape CLAUDE.md's structured-i18n carve-out (added in PR #76) forbids: non-English
+  strings live ONLY in ``src/metadata_i18n.py``
+
+or its future equivalent, never inline in flow code.
+
+Narrowed the accepted set to ``{"y", "yes"}``. Localising the cost-confirm prompt to match the
+  metadata-prompt i18n is a tracked follow-up; when it lands the per-language token set will join
+  ``src/metadata_i18n.py`` alongside the metadata-prompt tokens, and the prompt itself will print in
+  the user's language. The docstring on ``_confirm`` now documents that direction so the next
+  contributor doesn't reinstate the inline literal.
+
+New regression test ``test_confirm_accepts_english_yes_tokens_only`` pins both halves: English ``y``
+  / ``yes`` (case-insensitive) accepted;
+
+Turkish ``evet`` / ``e`` / ``hayır`` and gibberish rejected. The test also catches the prior
+  accepting-but-undocumented behaviour returning if anyone reverts the narrowing.
+
+Full suite: 718 passing (+1).
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- **ingestion**: Auto-hide colophon pages after OCR classification
+  ([#78](https://github.com/mfozmen/littlepress-ai/pull/78),
+  [`e2de33b`](https://github.com/mfozmen/littlepress-ai/commit/e2de33bd871e5476384b80081ade4aea705a33fb))
+
+* feat(ingestion): auto-hide colophon pages after OCR classification
+
+Reported during the 2026-04-25 Yavru Dinozor live render: page 5 of the Samsung Notes export read
+  ``YAZAR:POYRAZ RESİMLEYEN:POYRAZ`` — a colophon, not story content — but the pipeline rendered it
+  as a regular text-only interior page. User's framing: *"kapata olmalıydı bu yazılar … yapay zeka
+  bunları ayırt etmeli."*
+
+New ``src/colophon.py``:
+
+- ``detect_colophon_pages(draft, llm, console) -> list[int]`` enumerates every non-hidden page's
+  transcribed text in a single LLM round-trip and asks the model to return either ``<NONE>`` or a
+  ``<COLOPHON>`` block listing the metadata page numbers. Detected pages get ``page.hidden = True``;
+  ``page.text`` and ``page.image`` stay so ``restore_page`` in the review turn brings any
+  false-positive page back. - One LLM call per draft (not per page) — cheap. - ``NullProvider``
+  short-circuits to ``[]``; LLM exceptions are caught and surfaced as a dim warning. A startup crash
+  here would break ``littlepress draft.pdf`` after a successful OCR pass — worse than missing one
+  colophon. - ``_parse_reply`` is robust: tolerates surrounding prose around the block, dedupes
+  repeated page numbers, drops non-positive / out-of-range / non-numeric entries.
+
+Wired into ``Repl._run_ingestion``: runs immediately after OCR, before the deterministic metadata
+  prompts. The detection's console message names the hidden pages so the user can ``restore_page``
+  if classification was wrong.
+
+Name merging (``Poyraz Özmen`` superstring beats colophon-extracted ``POYRAZ``) is deliberately out
+  of scope for this slice — auto-hide alone closes the user's primary complaint (extra interior page
+  in the rendered book), and the cover already shows whatever the user typed at the metadata
+  prompts. The merge case is tracked as a follow-up in PLAN, deferred until a real user run shows it
+  actually mattering.
+
+Tests:
+
+- ``tests/test_colophon.py`` (14 new) — parser unit tests (block recognition, surrounding-prose
+  tolerance, NONE marker, dedupe, invalid-number filtering); orchestrator integration (auto-hide on
+  classified pages, no-op on ``<NONE>``, idempotent on already-hidden pages, no-op on empty /
+  all-hidden / NullProvider, exception swallowing, out-of-range page rejection, prompt enumerates
+  pages with numbers). - ``tests/test_repl_load.py`` updated: chat_calls expectation bumped from 2
+  to 3 (2 OCR + 1 colophon classification).
+
+Full suite: 732 passing (+14 new).
+
+PLAN entry trimmed to track only the deferred name-merging slice; README adds a colophon-detection
+  bullet.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(colophon): address PR #78 review — Turkish docstrings, NONE precedence, empty-text skip
+
+Four below-threshold review findings, all addressed.
+
+1. (score 75) Turkish strings inside module docstrings — both ``src/colophon.py`` and
+  ``tests/test_colophon.py`` quoted the ``YAZAR:POYRAZ RESİMLEYEN:POYRAZ`` exemplar and the user's
+  verbatim Turkish quote in their docstrings. CLAUDE.md is explicit: "The surrounding code — test
+  names, comments, docstrings, assertion messages — must still be English." The Turkish exemplar can
+  stay in fixture *strings* (which it already does in the test bodies), but the docstring references
+  are paraphrased to "an AUTHOR / ILLUSTRATOR credits page" / "the user expected the AI to tell
+  metadata pages apart from story pages."
+
+2. (score 50) ``_NONE_RE`` was defined but never used — ``_parse_reply`` only searched for the
+  ``<COLOPHON>`` block, so an LLM that hedged with both ``<NONE>`` and a ``<COLOPHON>`` block
+  silently got its block accepted, ignoring the negative signal. Added an explicit ``if
+  _NONE_RE.search(reply): return []`` short-circuit before the block search. The conservative call:
+  false positives on auto-hide cost the user a missing story page; missing a colophon costs at most
+  one ``hide_page`` call in the review turn. New regression test
+  ``test_parse_reply_none_marker_wins_over_colophon_block`` pins the precedence.
+
+3 + 4. (scores 75 + 50, related) Colophon detection ran even after OCR ingestion hard-failed, and
+  ``_build_prompt`` enumerated empty-text pages. Together these meant a half- ingested draft would
+  send ``Page N: `` to the LLM (empty body), wasting a round-trip and risking misclassification of
+  empty entries as metadata-shaped. Single fix: filter ``candidates`` to non-hidden pages with
+  actual transcribed text (``page.text.strip()``) before building the prompt. If every page is empty
+  (worst-case OCR-completely-failed), the orchestrator short-circuits to ``[]`` before any LLM call.
+  Two new regression tests: ``test_detect_colophon_pages_skips_empty_text_pages`` (mixed draft, only
+  non-empty pages enumerated) and
+  ``test_detect_colophon_pages_no_op_when_every_page_has_empty_text`` (all pages empty → no LLM call
+  at all).
+
+Full suite: 735 passing (+3 new regressions).
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.18.0 (2026-04-25)
+
+### Chores
+
+- **release**: 1.18.0 [skip ci]
+  ([`d76fd79`](https://github.com/mfozmen/littlepress-ai/commit/d76fd79248dfe1eef6e43b01546a79d671180f34))
 
 ### Features
 
