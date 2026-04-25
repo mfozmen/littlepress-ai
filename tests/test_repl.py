@@ -66,9 +66,32 @@ def test_ctrl_c_at_prompt_exits_cleanly():
     )
 
 
-def test_eof_exits_cleanly():
-    repl, _ = _make([])
+def test_eof_at_prompt_exits_cleanly_and_consumes_no_further_input():
+    """Symmetric pin to ``test_ctrl_c_at_prompt_exits_cleanly``: EOF
+    (Ctrl-D) must also exit immediately with code 0 and not consume
+    any later scripted input. PR #75 review #1: the prior
+    ``test_eof_exits_cleanly`` only fed ``[]`` so it couldn't
+    distinguish "exit on EOF" from "exit after the read failed and
+    something else hit the loop"; this test feeds a ``should-never-
+    be-read`` follow-up entry to assert the loop bails on the EOF
+    itself."""
+
+    lines = [EOFError, "should-never-be-read"]
+
+    def read():
+        head = lines.pop(0)
+        if head is EOFError:
+            raise EOFError
+        return head
+
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+    repl = Repl(read_line=read, console=console, provider=find("none"))
+
     assert repl.run() == 0
+    assert lines == ["should-never-be-read"], (
+        f"EOF should have exited immediately; remaining script: {lines!r}"
+    )
 
 
 def test_help_lists_available_commands():
