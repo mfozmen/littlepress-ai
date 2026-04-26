@@ -3165,7 +3165,13 @@ def test_render_book_viewer_failure_is_non_fatal(tmp_path):
     """If the OS viewer can't be launched (headless env, permission
     error), the render still reports success — the files are on disk —
     but the message honestly tells the user to open the file themselves
-    instead of falsely claiming it was opened."""
+    instead of falsely claiming it was opened.
+
+    Scopes to ``impose=False`` so this test exercises only the
+    viewer-failure path; under the new ``impose=True`` default the
+    test would also run the booklet imposition end-to-end and a
+    pypdf regression elsewhere would fail this test for the wrong
+    reason. PR #81 review #2."""
     draft = _two_page_draft(tmp_path)
 
     def boom(_p):
@@ -3177,7 +3183,7 @@ def test_render_book_viewer_failure_is_non_fatal(tmp_path):
         open_file=boom,
     )
 
-    result = tool.handler({})
+    result = tool.handler({"impose": False})
 
     assert "A5 book written" in result
     assert (tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf").is_file()
