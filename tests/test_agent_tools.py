@@ -3945,6 +3945,39 @@ def test_restore_page_ignores_non_image_strays(tmp_path):
     assert "no original image" in result.lower()
 
 
+def test_try_extract_drawing_returns_none_on_no_image(tmp_path):
+    """``_try_extract_drawing`` short-circuits to ``None`` when
+    ``page_image`` is ``None`` — the MIXED branch passes
+    ``page.image`` directly, and a page with no image attached
+    has nothing to extract from. Pinned so a future caller doesn't
+    accidentally try to extract from ``None`` and crash the load
+    flow."""
+    from src.agent_tools import _try_extract_drawing
+
+    assert _try_extract_drawing(None) is None
+
+
+def test_try_extract_drawing_swallows_exception_and_returns_none(tmp_path, monkeypatch):
+    """PR #80 review #2: extraction failure must be non-fatal — a
+    crash here would break the OCR ingestion mid-flow on what's
+    otherwise a valid draft. Stub ``extract_drawing_region`` to
+    raise; the helper catches and returns ``None`` so the MIXED
+    branch falls back to text-only safely."""
+    from pathlib import Path
+
+    from src import agent_tools, drawing_extraction
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("PIL exploded / numpy mismatch / whatever")
+
+    monkeypatch.setattr(drawing_extraction, "extract_drawing_region", boom)
+
+    fake_image = tmp_path / "page-01.png"
+    fake_image.write_bytes(b"x")  # path must exist for ``parent`` resolution
+
+    assert agent_tools._try_extract_drawing(fake_image) is None
+
+
 def test_restore_page_does_not_pick_extracted_drawing_companion(tmp_path):
     """PR #80 review #1 regression: ``_try_extract_drawing`` writes
     ``page-NN.drawing.png`` next to ``page-NN.png`` in the same

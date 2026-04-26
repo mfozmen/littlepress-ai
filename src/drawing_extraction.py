@@ -104,7 +104,7 @@ def extract_drawing_region(
         rgb = img.convert("RGB")
         gray = np.array(rgb.convert("L"))
 
-    height, width = gray.shape
+    width = gray.shape[1]
     content = gray < content_threshold
     row_density = content.sum(axis=1)
     threshold = int(row_min_density_pct * width)
@@ -125,16 +125,22 @@ def extract_drawing_region(
     # isn't decisively taller than the rest. Without this, a page
     # with one long uninterrupted text block would get its text
     # block cropped as if it were the drawing. PR #80 review #3.
+    # ``_content_runs`` only emits ``end > start`` tuples, so
+    # ``second_tallest`` is guaranteed positive — no zero-divide
+    # concern.
     if len(runs) >= 2:
         second_tallest = runs[1][1] - runs[1][0]
-        if second_tallest > 0 and tallest_height < min_contrast_ratio * second_tallest:
+        if tallest_height < min_contrast_ratio * second_tallest:
             return False
 
+    # ``has_content`` filtered rows above the density threshold,
+    # so the tallest run's strip has at least
+    # ``row_min_density_pct * width`` content pixels per row by
+    # construction — column-density on that strip is non-zero. No
+    # need for a defensive zero-cols guard.
     strip = content[y_start:y_end, :]
     col_density = strip.sum(axis=0)
     content_cols = (col_density >= 1).nonzero()[0]
-    if content_cols.size == 0:
-        return False
     x_start = int(content_cols[0])
     x_end = int(content_cols[-1]) + 1
 
