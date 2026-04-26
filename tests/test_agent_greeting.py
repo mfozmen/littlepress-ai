@@ -106,11 +106,17 @@ def test_ai_cover_branch_does_not_inject_deterministic_cover_state():
     # AI cover block is present.
     assert "generate_cover_illustration" in g
     # Deterministic-cover-state framing absent ANYWHERE — the AI
-    # flow legitimately sets the cover, so any "do not call
-    # set_cover" / "intentionally None" framing would conflict.
-    assert "do not call" not in g or "set_cover" not in g.split("do not call")[1] if "do not call" in g else True
-    # Pin a unique substring that appears ONLY in the deterministic
-    # blocks, not in the AI block.
+    # flow legitimately sets the cover, so the deterministic
+    # "do not call set_cover" directive would conflict. PR #79
+    # round-2 #1: this assertion replaces an earlier split-based
+    # prefix check that only inspected text before the first
+    # ``"do not call"`` occurrence — direct full-greeting check
+    # is what the comment promises.
+    assert "do not call set_cover" not in g
+    # And pin two unique substrings that appear ONLY in the
+    # deterministic blocks. Either alone would catch a regression;
+    # both together guard against a future rewrite that drops one
+    # phrasing for the other while leaking the framing into AI.
     assert "complete poster configuration" not in g
     assert "first available page drawing" not in g
 
