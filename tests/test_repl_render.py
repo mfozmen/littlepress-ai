@@ -306,24 +306,6 @@ def test_render_custom_path_surfaces_build_failure(tmp_path, monkeypatch):
 
 
 def test_render_custom_path_does_not_version(tmp_path):
-    """An explicit ``/render <path>`` writes exactly to <path>.
-    No versioned copy on the side. Replaces the obsolete
-    ``test_render_warns_when_stable_copy_is_locked`` (locked-stable
-    code path was tied to the versioned-copy mirror, which no
-    longer exists)."""
-    pdf = _write_pdf(tmp_path, [{"text": "hi"}])
-    out = tmp_path / "custom" / "book.pdf"
-
-    repl, _ = _make(
-        tmp_path, [f"/load {pdf}", "/title Book", f"/render {out}", "/exit"]
-    )
-    assert repl.run() == 0
-
-    assert out.is_file()
-    assert not (out.parent / "book.v1.pdf").is_file()
-
-
-def test_render_custom_path_does_not_version(tmp_path):
     """An explicit ``/render <path>`` writes exactly to <path> — the
     user asked for a specific location, don't sneak a versioned copy
     in next to it."""

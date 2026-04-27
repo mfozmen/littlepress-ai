@@ -56,7 +56,7 @@ from typing import Callable
 
 from src.agent import Tool
 from src.builder import build_pdf
-from src.draft import Draft, atomic_copy, next_version_number, slugify, to_book
+from src.draft import Draft, slugify, to_book
 from src.imposition import impose_a5_to_a4
 from src.prune import prune
 from src.providers.image import ImageGenerationError, ImageProvider
@@ -1744,21 +1744,6 @@ def choose_layout_tool(get_draft: Callable[[], Draft | None]) -> Tool:
         },
         handler=handler,
     )
-
-
-def _mirror_stable(versioned: Path, stable: Path) -> bool:
-    """Atomically replace ``stable`` with a copy of ``versioned``.
-
-    Returns ``True`` on success, ``False`` if the stable path is locked
-    (typical on Windows when the user has the previous PDF open in a
-    viewer). A locked stable file isn't a render failure — the versioned
-    file is fresh — so the caller keeps going and tells the user.
-    """
-    try:
-        atomic_copy(versioned, stable)
-        return True
-    except OSError:
-        return False
 
 
 def _render_message(a5: Path, *, opened: bool) -> str:

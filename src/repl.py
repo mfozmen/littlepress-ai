@@ -1040,33 +1040,13 @@ def _require_title(repl: Repl) -> bool:
     return True
 
 
-def _mirror_or_warn(repl: Repl, src: Path, dst: Path) -> bool:
-    """Atomically copy ``src`` onto ``dst``; warn if the dst is locked.
-
-    Windows holds an exclusive lock on PDFs opened in a viewer; if the
-    user has the previous stable copy open in Acrobat, updating it
-    fails with ``PermissionError``. That isn't a render failure — the
-    versioned snapshot is fresh on disk — so we log a yellow hint and
-    keep going rather than claiming the whole render blew up.
-    """
-    from src.draft import atomic_copy
-
-    try:
-        atomic_copy(src, dst)
-        return True
-    except OSError:
-        repl._console.print(
-            f"[yellow]Couldn't update {dst.name}[/yellow] "
-            f"— is it open in a PDF viewer? Close it, then copy "
-            f"{src.name} over {dst.name} to refresh."
-        )
-        return False
 
 
 def _render_to_file(repl: Repl, source_dir: Path, out: Path) -> bool:
     """Render the loaded draft to exactly ``out``. Used by both the
-    custom-path and versioned paths (the versioned path's ``out`` is
-    the ``.vN.pdf`` snapshot)."""
+    default render path (``out`` = ``<slug>.pdf`` in
+    ``.book-gen/output/``) and the custom-path escape hatch
+    (``/render <path>``)."""
     from src.builder import build_pdf
     from src.draft import to_book
 

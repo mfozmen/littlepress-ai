@@ -120,16 +120,39 @@ def test_booklet_order_for_n6_puts_back_cover_on_outside_back():
     )
 
 
-def test_booklet_order_for_n6_no_physical_sheet_is_fully_blank():
+def test_booklet_order_no_physical_sheet_fully_blank_for_realistic_book_sizes():
     """The whole point of the PR #82 reshape: every consecutive
     pair in ``_booklet_order`` is a physical sheet side; if any
     pair is ``(None, None)`` the imposed PDF has a blank page.
-    Pin that no pair on the n=6 imposition is fully blank."""
-    order = _booklet_order(6)
+    Pin the invariant across the full realistic-book size range
+    (3..30 source pages: 1 cover + at least 1 story + 1 back, up
+    to a 28-story-page book — comfortable upper bound)."""
+    for n in range(3, 31):
+        order = _booklet_order(n)
+        pairs = [(order[i], order[i + 1]) for i in range(0, len(order), 2)]
+        for left, right in pairs:
+            assert not (left is None and right is None), (
+                f"n={n}: physical sheet pair {(left, right)} is "
+                f"fully blank — the imposed PDF would have a blank "
+                f"page. Full order: {order!r}"
+            )
+
+
+def test_booklet_order_n2_is_the_documented_degenerate_exception():
+    """``_reader_sequence(2)`` is the one case where the
+    no-fully-blank invariant CANNOT hold: cover + back-cover only,
+    pad=2, total=4. With one cover at pos 1 and one back cover at
+    pos 4, both interior slots (pos 2 and pos 3) must be blank,
+    and saddle-stitch pairs them onto opposite halves of the
+    single physical sheet — producing one fully-blank sheet by
+    construction. Documented exception, pinned here so future
+    callers know n=2 is degenerate (and the docstring of
+    ``_reader_sequence`` matches reality)."""
+    order = _booklet_order(2)
     pairs = [(order[i], order[i + 1]) for i in range(0, len(order), 2)]
-    for left, right in pairs:
-        assert not (left is None and right is None), (
-            f"physical sheet pair {(left, right)} is fully blank — "
-            f"the imposed PDF would have a blank page. Full order: "
-            f"{order!r}"
-        )
+    fully_blank = [p for p in pairs if p[0] is None and p[1] is None]
+    assert len(fully_blank) == 1, (
+        f"n=2 should have exactly ONE fully-blank pair (the "
+        f"unavoidable degenerate case); got {fully_blank!r} from "
+        f"{order!r}"
+    )
