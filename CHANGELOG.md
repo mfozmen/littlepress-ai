@@ -1,6 +1,92 @@
 # CHANGELOG
 
 
+## v1.21.0 (2026-05-19)
+
+### Features
+
+- **repl**: /print slash command + /help printing section + post-render hint
+  ([#87](https://github.com/mfozmen/littlepress-ai/pull/87),
+  [`cae2f5f`](https://github.com/mfozmen/littlepress-ai/commit/cae2f5f415f1d1f05c038e41052a47f517e8206b))
+
+* feat(repl): /print slash command + /help printing section + post-render hint
+
+User feedback 2026-04-28: ``docs/printing.md`` covers the print + fold + staple workflow in detail,
+  but a user already in the REPL after a successful render shouldn't have to alt-tab to GitHub or
+  the cloned doc tree to find it. Three slices land together:
+
+* New ``/print`` slash command. Walks through the in-app print guide directly in the terminal: file
+  naming (the user has TWO PDFs after a render and only one is the printable artefact), the three
+  critical settings (double-sided / short-edge bind / Booklet-mode-OFF — getting any wrong wastes
+  paper), the manual-duplex flow for printers without auto-duplex (Canon Pixma, etc.), and the fold
+  + staple steps. ``docs/printing.md`` remains the long form with screenshots, OS-specific dialog
+  details, and the Turkish UI mapping table; ``/print`` points there for anything beyond the quick
+  reference.
+
+* ``/help`` extended with a "Printing the booklet" section. Names the booklet file
+  (``<slug>_A4_booklet.pdf``), the three critical settings, ``/print`` for the long form, and
+  ``docs/printing.md`` for screenshots. Even a user who didn't know ``/print`` exists finds the
+  essentials when they reach for ``/help``.
+
+* ``render_book``'s post-impose success message now ends with a ``/print`` hint. Right when the user
+  has the freshly-imposed PDF on disk and is wondering what to do next, the agent's reply tells them
+  ``/print`` exists.
+
+Workflow position: ``/print`` slots between ``/render`` and ``/prune`` in the slash-menu order. The
+  render → print pair is the "PDF on disk → physical book in hand" gap; the menu now covers both
+  halves.
+
+Tests:
+
+* ``tests/test_repl_print.py`` (6 unit tests): the ``/print`` output names the booklet filename
+  pattern, lists all three critical settings, covers fold + staple, and points at
+  ``docs/printing.md``; the ``/help`` extension surfaces a printing section with the booklet
+  filename and the doc pointer. * ``tests/test_slash_menu.py``: order test extended to expect
+  ``print`` at position 6. * ``tests/test_agent_tools.py``:
+  ``test_render_book_success_message_points_at_in_app_print_help`` pins the ``/print`` mention in
+  the booklet success reply.
+
+Suite: 780 passing (was 773; +7 net new tests).
+
+README's slash-command table gains a ``/print`` row spelling out the full surface (slash command +
+  ``/help`` section + post-render hint) so future maintainers see the three integration points
+  together. PLAN entry trimmed to SHIPPED.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(repl-print): tighten Booklet-mode-OFF assertion and pin /print in /help Commands block
+
+#1 (75): the prior loose form ``"booklet" in out and ("off" or "do not" or "don't" or "avoid")`` was
+  satisfied by the unrelated ``"Don't try to read the booklet on screen."`` prose alone — both
+  ``"booklet"`` AND ``"don't"`` land in that one sentence. The test would still pass even if the
+  actual ``"Booklet mode OFF"`` critical-settings line were removed. Same recurring pattern flagged
+  on PRs #66 and #79; tightening here so this iteration breaks it.
+
+Replaced with an explicit two-substring assertion: ``"booklet mode" in out_lower`` AND ``"off" in
+  out_lower``. The two-word ``"booklet mode"`` collocation only appears in the settings block — it
+  can't be satisfied accidentally by surrounding prose. The test docstring also names the prior
+  loose form so future maintainers see what shape was rejected and why.
+
+#3 (50): the slash-command full-list order test catches accidental ``print`` drops indirectly (any
+  reorder / removal fails the equality). Added ``test_help_lists_print_in_the_ commands_block`` to
+  pin the intent explicitly: render ``/help``, slice the output to the ``Commands:`` block (above
+  the "Printing the booklet" section, which also mentions ``/print`` and would otherwise satisfy a
+  naive substring search), assert ``"/print"`` appears there. Cheap insurance against a
+  help-renderer bug that silently skips one command.
+
+#2 (50): README ``/print`` row was 5 sentences with implementation rationale (``"The /help output
+  also surfaces…"``, ``"After every successful --impose render…"``) — that's PR-description framing,
+  not user-reference style. Trimmed to one short clause matching the rest of the slash-command
+  table; the extra surface (``/help`` mention + ``render_book`` hint) is covered by the existing
+  prose around the table.
+
+Suite: 781 passing (was 780; +1 explicit /help-pin test).
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.20.5 (2026-04-29)
 
 ### Bug Fixes
@@ -243,6 +329,11 @@ The function that actually runs pytesseract and applies ``str(reply).strip()`` i
 ---------
 
 Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.20.5 [skip ci]
+  ([`45d5814`](https://github.com/mfozmen/littlepress-ai/commit/45d58141111e086e24ea43aa76385db3ac23cdd5))
 
 
 ## v1.20.4 (2026-04-28)
