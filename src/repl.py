@@ -37,7 +37,7 @@ from src.agent_tools import (
     transcribe_page_tool,
 )
 from src.draft import Draft
-from src.providers.image import OpenAIImageProvider
+from src.providers.image import ImageProvider, OpenAIImageProvider
 from src.providers.llm import (
     PICKER_SPECS,
     SPECS,
@@ -369,7 +369,28 @@ class Repl:
         self._llm: LLMProvider = (
             self._llm_factory(provider, None) if provider is not None else NullProvider()
         )
+        # Decoupled image-generation provider. Source of truth for whether
+        # the agent gets ``generate_cover_illustration`` /
+        # ``generate_page_illustration`` tools. Three population paths:
+        #   1. ``/image-model`` slash command — explicit; uses a separate
+        #      key, lets the user mix Claude chat with OpenAI images.
+        #   2. ``_refresh_image_provider`` auto-wire — when chat=OpenAI
+        #      with a key, populates this slot from the same key so
+        #      existing single-provider users don't need ``/image-model``.
+        #   3. Session resume on launch — restored from session.json +
+        #      keyring.
+        # Storing the instance directly (not spec + key) keeps the
+        # ``_build_agent`` check trivial: ``self._image_provider is not
+        # None``.
+        self._image_provider: ImageProvider | None = None
+        # The provider's label — what to print, what to persist in
+        # session.json (e.g. ``"openai"``). ``None`` means no image
+        # provider configured.
+        self._image_provider_label: str | None = None
         self._draft: Draft | None = None
+        # ``_build_agent`` calls ``_refresh_image_provider`` itself
+        # so the slot reflects the current chat-provider state at
+        # construction time (auto-wire for chat=OpenAI users).
         self._agent: Agent = self._build_agent()
         # Commands are stored in a dict for fast dispatch, but the
         # iteration order (= /help print order and completion order)
@@ -410,11 +431,26 @@ class Repl:
         self._console.print(
             "Type [cyan]/help[/cyan] for commands, [cyan]/exit[/cyan] to leave.\n"
         )
+        # Restore an explicit ``/image-model`` choice from
+        # session.json so the image tools light up at startup
+        # without an extra ``/image-model`` step. The auto-wire
+        # path (chat=OpenAI) still runs inside
+        # ``_refresh_image_provider``; restore only kicks in for
+        # the explicit cross-provider case.
+        self._restore_image_provider_from_session()
         if self._provider is None:
             chosen = self._resume_or_pick()
             if chosen is None:
                 return 0
-            self._activate(*chosen)
+            self._activate(*chosen)  # ``_activate`` rebuilds the agent.
+        else:
+            # Preset-provider path (tests, future direct-construction
+            # entry points). ``__init__`` already ran ``_build_agent``
+            # before the restore had a chance to populate the slot,
+            # so rebuild now to pick up the restored image-provider
+            # state. No-op cost on the auto-wire / no-restore paths
+            # because ``_refresh_image_provider`` is idempotent.
+            self._agent = self._build_agent()
         self._greet_if_draft_loaded()
         return self._read_loop()
 
@@ -514,13 +550,59 @@ class Repl:
         self._provider = spec
         self._api_key = api_key
         self._llm = self._llm_factory(spec, api_key)
+        # Refresh the image provider's auto-wire branch in case the
+        # new chat provider lit up (chat switched to OpenAI) or went
+        # dark (switched away with no explicit /image-model on record).
+        self._refresh_image_provider()
         self._agent = self._build_agent()
         self._console.print(f"[green]Active model:[/green] {spec.display_name}\n")
         self._persist()
         if spec.requires_api_key and api_key:
             keyring_store.save_key(spec.name, api_key)
 
+    def _refresh_image_provider(self) -> None:
+        """Reconcile ``self._image_provider`` against the current chat
+        provider state. Backwards-compat auto-wire for chat=OpenAI
+        users: populate the slot from the chat key so single-provider
+        sessions get the image tools out of the box.
+
+        Label tri-state — both halves of ``_image_provider_label``
+        being "set" matter:
+
+          * ``None``    — no explicit user choice on record. Auto-
+                          wire is free to populate (chat=OpenAI+key)
+                          or clear the slot.
+          * ``"openai"``— explicit ``/image-model openai``. Auto-
+                          wire skipped; the slot is the user's to
+                          manage.
+          * ``"none"``  — explicit ``/image-model none``. Auto-wire
+                          MUST skip even on chat=OpenAI; the user
+                          explicitly turned image generation off
+                          and the implicit chat-key auto-wire would
+                          undo that. Pinned by
+                          ``test_image_model_none_actually_clears_
+                          when_chat_is_openai``.
+        """
+        if self._image_provider_label is not None:
+            # Explicit /image-model in effect — caller owns the slot.
+            return
+        if (
+            self._provider is not None
+            and self._provider.name == "openai"
+            and self._api_key
+        ):
+            self._image_provider = OpenAIImageProvider(api_key=self._api_key)
+        else:
+            self._image_provider = None
+
     def _build_agent(self) -> Agent:
+        # Reconcile auto-wire BEFORE building the tool list so a
+        # post-construction state change (test helpers mutating
+        # ``_api_key``, or future code paths that swap providers
+        # without going through ``_activate``) still picks up the
+        # right image-provider state. An explicit /image-model is
+        # always respected.
+        self._refresh_image_provider()
         get_draft = lambda: self._draft  # noqa: E731
         get_session_root = lambda: self._session_root or Path.cwd()  # noqa: E731
         tools = [
@@ -554,17 +636,20 @@ class Repl:
                     get_llm=lambda: self._llm,
                 )
             )
-        # AI cover generation is OpenAI-only for now — don't advertise
-        # a tool that would 401 on first use. When the user is on
-        # another provider (or hasn't entered a key yet) the agent
-        # simply doesn't see this option and falls back to set_cover.
-        if self._provider is not None and self._provider.name == "openai" and self._api_key:
-            image_provider = OpenAIImageProvider(api_key=self._api_key)
+        # AI cover + page illustration register based on the
+        # ``_image_provider`` slot — independent of which chat
+        # provider is active. The slot is populated by either an
+        # explicit ``/image-model`` invocation OR ``_activate``'s
+        # backwards-compat auto-wire for chat=OpenAI users. This
+        # lets a user run Claude / Gemini / Ollama as the chat
+        # provider while OpenAI handles cover generation (PLAN
+        # 2026-04-28: multi-provider sessions).
+        if self._image_provider is not None:
             tools.append(
                 generate_cover_illustration_tool(
                     get_draft=get_draft,
                     get_session_root=get_session_root,
-                    image_provider=image_provider,
+                    image_provider=self._image_provider,
                     confirm=self._confirm,
                 )
             )
@@ -572,7 +657,7 @@ class Repl:
                 generate_page_illustration_tool(
                     get_draft=get_draft,
                     get_session_root=get_session_root,
-                    image_provider=image_provider,
+                    image_provider=self._image_provider,
                     confirm=self._confirm,
                 )
             )
@@ -611,8 +696,46 @@ class Repl:
         if self._session_root is None or self._provider is None:
             return
         session_mod.save(
-            self._session_root, session_mod.Session(provider=self._provider.name)
+            self._session_root,
+            session_mod.Session(
+                provider=self._provider.name,
+                image_provider=self._image_provider_label,
+            ),
         )
+
+    def _restore_image_provider_from_session(self) -> None:
+        """Reconstruct ``self._image_provider`` from a saved session.
+
+        Reads ``session.json``'s ``image_provider`` field; if set,
+        looks up the matching key in the keyring and instantiates
+        the provider. Silently no-ops when:
+          * no session file (fresh project),
+          * field is unset (auto-derive path, not explicit),
+          * keyring has no key for the named provider (user
+            ``/logout``-ed or cleared their OS keychain).
+        The auto-wire path still fires from ``_build_agent`` for
+        chat=OpenAI users — restore only kicks in for the EXPLICIT
+        cross-provider case.
+        """
+        if self._session_root is None:
+            return
+        saved = session_mod.load(self._session_root).image_provider
+        if not saved:
+            return
+        if saved == "none":
+            # User explicitly turned image generation off on a prior
+            # session — restore the sentinel so the auto-wire stays
+            # skipped at startup. The slot itself stays empty.
+            self._image_provider_label = "none"
+            return
+        if saved == "openai":
+            key = keyring_store.load_key("openai")
+            if not key:
+                return
+            self._image_provider = OpenAIImageProvider(api_key=key)
+            self._image_provider_label = "openai"
+            return
+        # Future image-provider names land here.
 
     def _resume_or_pick(self) -> tuple[ProviderSpec, str | None] | None:
         """Try to restore the saved provider (with its stored key if any);
@@ -1021,6 +1144,116 @@ def _cmd_print(repl: Repl, _args: str) -> None:
     return None
 
 
+def _cmd_image_model(repl: Repl, args: str) -> None:
+    """Set or clear the decoupled image-generation provider.
+
+    Usage:
+      ``/image-model``         — show current image-provider state
+      ``/image-model openai``  — prompt for an OpenAI key, validate,
+                                 use OpenAI for image generation
+                                 (chat provider stays as-is)
+      ``/image-model none``    — clear the image provider
+
+    The image-provider slot is independent of the chat provider:
+    one user might run Claude as the chat agent + OpenAI for cover
+    generation. ``_build_agent`` keys off the slot, not the chat
+    provider's name, so the image tools light up regardless of
+    what's answering the chat.
+    """
+    arg = args.strip().lower()
+    if not arg:
+        _print_image_model_status(repl)
+        return None
+    if arg in ("none", "off", "clear"):
+        _clear_image_model(repl)
+        return None
+    if arg == "openai":
+        _set_image_model_openai(repl)
+        return None
+    repl._console.print(
+        f"[red]Unknown image provider:[/red] {arg!r}. "
+        "Try [cyan]/image-model openai[/cyan] or "
+        "[cyan]/image-model none[/cyan]."
+    )
+    return None
+
+
+def _print_image_model_status(repl: Repl) -> None:
+    c = repl._console
+    label = repl._image_provider_label
+    if label == "none":
+        c.print(
+            "Image provider: [yellow]explicitly off[/yellow] (set via "
+            "``/image-model none``). The agent can't generate cover or "
+            "page illustrations until this is changed."
+        )
+    elif label:
+        c.print(
+            f"Image provider: [green]{label}[/green] (explicit)."
+        )
+    elif repl._image_provider is not None:
+        # Auto-wired from a chat=OpenAI session.
+        c.print(
+            "Image provider: [green]openai[/green] "
+            "(auto-derived from the chat key)."
+        )
+    else:
+        c.print(
+            "Image provider: [dim]not configured[/dim]. "
+            "The agent can't generate cover or page illustrations."
+        )
+    c.print(
+        "  [cyan]/image-model openai[/cyan]  — set OpenAI as the image "
+        "provider (separate API key)."
+    )
+    c.print(
+        "  [cyan]/image-model none[/cyan]    — clear."
+    )
+
+
+def _clear_image_model(repl: Repl) -> None:
+    had_one = repl._image_provider is not None
+    repl._image_provider = None
+    # Sentinel label ``"none"`` marks the clear as EXPLICIT so the
+    # backwards-compat auto-wire in ``_refresh_image_provider`` skips
+    # it on chat=OpenAI sessions. Without the sentinel, ``label is
+    # None`` would be indistinguishable from "never configured" and
+    # the next ``_build_agent`` call would silently re-populate the
+    # slot from the chat key, undoing the user's explicit off.
+    repl._image_provider_label = "none"
+    repl._agent = repl._build_agent()
+    repl._persist()
+    if had_one:
+        repl._console.print("[green]Image provider cleared.[/green]")
+    else:
+        repl._console.print("[dim]No image provider was set.[/dim]")
+
+
+def _set_image_model_openai(repl: Repl) -> None:
+    spec = find("openai")
+    if spec is None:
+        repl._console.print(
+            "[red]OpenAI provider isn't available in this build.[/red]"
+        )
+        return
+    repl._show_key_guidance(spec)
+    api_key = repl._read_and_validate_key(spec)
+    if not api_key:
+        repl._console.print(
+            "[yellow]Image-provider setup aborted — no key entered.[/yellow]"
+        )
+        return
+    repl._image_provider = OpenAIImageProvider(api_key=api_key)
+    repl._image_provider_label = "openai"
+    repl._agent = repl._build_agent()
+    keyring_store.save_key("openai", api_key)
+    repl._persist()
+    repl._console.print(
+        "[green]Image provider set to OpenAI.[/green] "
+        "Cover and page illustration tools are now available."
+    )
+
+
 def _cmd_model(repl: Repl, _args: str) -> None:
     """Re-run the provider picker. Aborting keeps the previous provider."""
     chosen = repl._prompt_for_provider()
@@ -1375,6 +1608,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("print",  "Show how to print, fold, and staple the A4 booklet",  _cmd_print),
     SlashCommand("prune",  "Remove orphan images + old snapshots from .book-gen", _cmd_prune),
     SlashCommand("model",  "Switch the active LLM provider",                      _cmd_model),
+    SlashCommand("image-model", "Set or clear the image-generation provider (decoupled from /model)", _cmd_image_model),
     SlashCommand("logout", "Forget the saved API key and go offline",             _cmd_logout),
     SlashCommand("help",   "Show available commands",                             _cmd_help),
     SlashCommand("exit",   "Leave the session (Ctrl-D also exits)",               _cmd_exit),
