@@ -1,7 +1,158 @@
 # CHANGELOG
 
 
+## v1.22.0 (2026-05-19)
+
+### Features
+
+- **repl**: /image-model slash command decouples image provider from chat provider
+  ([#88](https://github.com/mfozmen/littlepress-ai/pull/88),
+  [`6ba24b5`](https://github.com/mfozmen/littlepress-ai/commit/6ba24b59db2f817a25b65bda6411a99a0741e9f0))
+
+* feat(repl): /image-model slash command decouples image provider from chat provider
+
+Reported 2026-04-28: the maintainer's workflow is Claude as the chat agent + OpenAI for
+  ``generate_cover_illustration``. Today that means toggling ``/model`` mid-session which drops the
+  chat context. PLAN's option (b): a separate ``image_provider`` slot on the REPL, decoupled from
+  the chat provider, set by a new ``/image-model`` slash command.
+
+REPL state ----------
+
+New ``Repl._image_provider: ImageProvider | None`` slot is the source of truth for whether
+  ``generate_cover_illustration`` / ``generate_page_illustration`` register with the agent.
+  ``_build_agent`` keys off the slot, NOT the chat provider's name — so a Claude chat session can
+  have OpenAI image tools loaded.
+
+Three population paths:
+
+* ``/image-model openai`` — explicit. Sets the slot AND the label ``_image_provider_label =
+  "openai"``; the label is the "user explicitly chose this" marker that survives chat switches (a
+  ``/model anthropic`` after an explicit ``/image-model openai`` leaves the image provider alone). *
+  ``_refresh_image_provider`` — backwards-compat auto-wire. When chat=OpenAI + key AND no explicit
+  label on record, the chat key populates the slot so existing single-provider OpenAI users get
+  image tools without running ``/image-model``. Auto-wire leaves the label at ``None`` so a chat
+  switch correctly drops the implicit slot. * Session restore on launch —
+  ``_restore_image_provider_from_ session`` reads ``image_provider`` from ``.book-gen/session.
+  json``, looks up the key in the keyring, instantiates the provider before the first
+  ``_build_agent`` runs.
+
+``/image-model`` slash command ------------------------------
+
+* ``/image-model`` — prints current state + usage. * ``/image-model openai`` — shows the key
+  guidance, prompts via ``_read_secret``, validates using the injected validator, instantiates
+  ``OpenAIImageProvider``, saves the key to keyring under the ``"openai"`` entry, persists the label
+  to ``session.json``. * ``/image-model none`` — clears slot + label, persists.
+
+Sits between ``/model`` and ``/logout`` in the slash-menu order (auth/provider cluster).
+
+Persistence -----------
+
+``Session`` dataclass grew ``image_provider: str | None``. Load reconstructs both fields from JSON;
+  save writes both. Existing session.json files without the new field load cleanly (None default).
+
+Keyring: same scheme as chat keys — ``(SERVICE, provider_name)``,
+
+so the OpenAI image key lives under the same entry the chat provider would use if chat were also
+  OpenAI. The maintainer's case (Claude chat + OpenAI images) uses different provider names so no
+  collision; the same-provider-different-keys edge case is out of scope for this slice.
+
+Edge case (documented in code): ``/image-model none`` after a chat=OpenAI auto-wire only stays
+  cleared for the current session; next launch the auto-wire fires again because the "explicitly
+  off" state isn't distinguished from "never set". Filed as a follow-up if real usage shows it
+  matters.
+
+Test coverage -------------
+
+New ``tests/test_repl_image_model.py`` — 11 tests:
+
+* slot defaults to ``None``; * image tools register when slot is set with non-OpenAI chat; * image
+  tools omitted when slot is unset; * chat=OpenAI auto-wires for backwards compat; *
+  ``/image-model`` no-arg prints current state; * ``/image-model openai`` prompts for key +
+  validates + sets the slot; * ``/image-model none`` clears slot + label; * ``/image-model openai``
+  aborts cleanly on empty key; * session.json round-trips ``image_provider`` after both set and
+  clear operations; * launch restore: seeded session.json + stubbed keyring → slot populated before
+  first ``_build_agent``.
+
+Slash-menu order test extended to expect ``image-model`` at position 9 (between ``/model`` and
+  ``/logout``).
+
+Suite: 792 passing (was 781; +11 net new tests).
+
+README slash-command table gains an ``/image-model`` row spelling out the three argument forms + the
+  persistence behaviour + the backwards-compat auto-wire. PLAN entry trimmed to SHIPPED.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(image-model): /image-model none persists as explicit-off sentinel; run() rebuilds agent after
+  restore
+
+Four findings on PR #88 from the code reviewer (75 / 75 / 50 / 50). #1 was a real bug, #3 a
+  defensive fix for a test-fixture gap, #2 a stale README paragraph, #4 the recurring
+  vacuous-assertion pattern. All addressed.
+
+#1 (75): ``/image-model none`` was a silent no-op on chat=OpenAI sessions. ``_clear_image_model``
+  set ``_image_provider_label = None`` then rebuilt the agent. ``_refresh_image_provider``'s
+  auto-wire saw ``label is None`` + chat=openai + key and re-populated the slot from the chat key —
+  undoing the clear. The green "Image provider cleared" message printed but the image tools stayed
+  registered. The existing ``test_image_model_none_clears_the_slot`` used chat=anthropic and never
+  exercised the auto-wire branch, so the bug slipped through.
+
+Fix: tri-state label. ``"none"`` is the EXPLICIT-OFF sentinel
+
+that ``_refresh_image_provider`` reads as "skip auto-wire, user explicitly turned it off". Persists
+  to session.json as ``"none"`` so the off state survives restart (without the sentinel, restore
+  would set label back to ``None`` and the next launch's auto-wire would re-fire on chat=OpenAI).
+  New ``test_image_model_none_actually_clears_when_chat_is_openai`` pins the contract: chat=OpenAI
+  auto-wire fires at fixture construction, ``/image-model none`` then runs, slot must be empty AND
+  image tools must be unregistered.
+
+Label tri-state now:
+
+* ``None`` — no explicit choice. Auto-wire is free to fire. * ``"openai"``— explicit /image-model
+  openai. * ``"none"`` — explicit /image-model none. Auto-wire skips.
+
+#3 (50): ``run()`` restored the image provider from session.json BEFORE the chat-provider
+  activation, but the restore happened AFTER ``__init__``'s ``_build_agent()``. When ``Repl(...)``
+  was constructed with a preset provider (tests; future direct-construction entry points),
+  ``__init__`` built the agent with the slot empty, then ``run()`` populated the slot — but
+  ``self._agent`` was never rebuilt, so the image tools stayed missing until the next
+  ``_build_agent`` trigger.
+
+The CLI flow doesn't hit this today (it passes ``provider=None`` and ``run()`` rebuilds via
+  ``_activate``), but it's a defensive fix. ``run()`` now rebuilds the agent on the preset-provider
+  branch after the restore. New ``test_run_rebuilds_agent_after_restoring_image_provider_from_
+  session`` seeds session.json + stubs keyring, constructs a preset-provider Repl, asserts the image
+  tools register after ``run()``.
+
+#2 (75): README Status section (line 34) said ``"Not offered on Anthropic / Gemini / Ollama for now
+  — switch to OpenAI via /model when you want it."`` — the inverse of what this PR ships. Rewrote
+  both AI-illustration bullets (cover + page) to describe the decoupled image-provider model:
+  ``/image-model`` decoupled from chat; chat=OpenAI still auto-wires from the chat key so
+  single-provider users don't need the new command. The slash-command-table row was already correct;
+  the prose paragraph above it was the stale half.
+
+#4 (50): Vacuous ``"openai" in out_lower`` in
+  ``test_image_model_command_with_no_arg_shows_current_state``. ``_print_image_model_status``
+  unconditionally prints the usage hint line ``/image-model openai — set OpenAI...`` regardless of
+  current state, so the assertion was satisfied even if the current-state output line broke
+  entirely. Same recurring vacuous pattern flagged on PR #87.
+
+Replaced with ``"/image-model openai" in out`` — the literal command form. Test docstring also names
+  the prior loose form so the recurring pattern surfaces for future readers.
+
+Suite: 794 passing (was 792; +2 new regression tests).
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.21.0 (2026-05-19)
+
+### Chores
+
+- **release**: 1.21.0 [skip ci]
+  ([`05d3243`](https://github.com/mfozmen/littlepress-ai/commit/05d324381723fdab64636e024731c198493715bc))
 
 ### Features
 
