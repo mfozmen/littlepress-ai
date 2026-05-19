@@ -45,6 +45,7 @@ def test_slash_commands_follow_logical_workflow_order():
         "print",
         "prune",
         "model",
+        "image-model",
         "logout",
         "help",
         "exit",

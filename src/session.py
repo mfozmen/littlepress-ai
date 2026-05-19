@@ -7,7 +7,13 @@ in a follow-up PR (see ``docs/p1-02-session-state.md``).
 
 On-disk shape (``.book-gen/session.json``)::
 
-    {"provider": "anthropic"}
+    {"provider": "anthropic", "image_provider": "openai"}
+
+``image_provider`` is the decoupled image-generation provider —
+``None`` (the default) means none configured, ``"openai"`` means
+``/image-model openai`` was used. The chat ``provider`` and the
+``image_provider`` are independent: a user can run Claude as the
+chat agent and OpenAI for cover generation.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ SESSION_FILE = "session.json"
 @dataclass
 class Session:
     provider: str | None = None
+    image_provider: str | None = None
 
 
 def path(root: Path) -> Path:
@@ -40,8 +47,12 @@ def load(root: Path) -> Session:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return Session()
-    provider = data.get("provider") if isinstance(data, dict) else None
-    return Session(provider=provider)
+    if not isinstance(data, dict):
+        return Session()
+    return Session(
+        provider=data.get("provider"),
+        image_provider=data.get("image_provider"),
+    )
 
 
 def save(root: Path, session: Session) -> None:

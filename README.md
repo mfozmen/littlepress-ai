@@ -115,6 +115,7 @@ Today's slash commands (still available as escape hatches). Type `/` alone to po
 | `/print` | show the in-app print + fold + staple guide for the A4 booklet (also linked from `/help` and from `render_book`'s success message). |
 | `/prune [--dry-run] [--keep N]` | remove orphan images and old snapshot PDFs from `.book-gen/`. Keeps the newest `N` snapshot versions (default 3); `--dry-run` previews without deleting. Runs automatically after every versioned `/render` too. |
 | `/model` | switch the active LLM provider (re-prompts for an API key if required) |
+| `/image-model [openai\|none]` | set or clear the image-generation provider, independent of the chat provider. Lets you run Claude as the chat agent while OpenAI handles `generate_cover_illustration` / `generate_page_illustration`. With no argument, prints the current state. `openai` prompts for an API key (validated + saved to your keychain under a separate entry from the chat key). `none` clears. The choice persists across launches via `.book-gen/session.json`. Backwards-compat: a chat=OpenAI session still auto-derives an image provider from the chat key with no `/image-model` invocation needed. |
 | `/logout` | forget the saved API key and drop back to offline mode |
 | `/help` | show available commands |
 | `/exit` | leave the session (Ctrl-D also exits) |
