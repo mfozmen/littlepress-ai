@@ -432,17 +432,25 @@ class Repl:
             "Type [cyan]/help[/cyan] for commands, [cyan]/exit[/cyan] to leave.\n"
         )
         # Restore an explicit ``/image-model`` choice from
-        # session.json BEFORE the first ``_build_agent`` so the
-        # image tools light up at startup without an extra
-        # ``/image-model`` step. The auto-wire path (chat=OpenAI)
-        # still runs inside ``_refresh_image_provider``; restore
-        # only kicks in for the explicit cross-provider case.
+        # session.json so the image tools light up at startup
+        # without an extra ``/image-model`` step. The auto-wire
+        # path (chat=OpenAI) still runs inside
+        # ``_refresh_image_provider``; restore only kicks in for
+        # the explicit cross-provider case.
         self._restore_image_provider_from_session()
         if self._provider is None:
             chosen = self._resume_or_pick()
             if chosen is None:
                 return 0
-            self._activate(*chosen)
+            self._activate(*chosen)  # ``_activate`` rebuilds the agent.
+        else:
+            # Preset-provider path (tests, future direct-construction
+            # entry points). ``__init__`` already ran ``_build_agent``
+            # before the restore had a chance to populate the slot,
+            # so rebuild now to pick up the restored image-provider
+            # state. No-op cost on the auto-wire / no-restore paths
+            # because ``_refresh_image_provider`` is idempotent.
+            self._agent = self._build_agent()
         self._greet_if_draft_loaded()
         return self._read_loop()
 
@@ -556,10 +564,25 @@ class Repl:
         """Reconcile ``self._image_provider`` against the current chat
         provider state. Backwards-compat auto-wire for chat=OpenAI
         users: populate the slot from the chat key so single-provider
-        sessions get the image tools out of the box. An explicit
-        ``/image-model`` choice (``_image_provider_label`` set)
-        takes precedence over the auto-wire and survives chat
-        switches."""
+        sessions get the image tools out of the box.
+
+        Label tri-state — both halves of ``_image_provider_label``
+        being "set" matter:
+
+          * ``None``    — no explicit user choice on record. Auto-
+                          wire is free to populate (chat=OpenAI+key)
+                          or clear the slot.
+          * ``"openai"``— explicit ``/image-model openai``. Auto-
+                          wire skipped; the slot is the user's to
+                          manage.
+          * ``"none"``  — explicit ``/image-model none``. Auto-wire
+                          MUST skip even on chat=OpenAI; the user
+                          explicitly turned image generation off
+                          and the implicit chat-key auto-wire would
+                          undo that. Pinned by
+                          ``test_image_model_none_actually_clears_
+                          when_chat_is_openai``.
+        """
         if self._image_provider_label is not None:
             # Explicit /image-model in effect — caller owns the slot.
             return
@@ -698,6 +721,12 @@ class Repl:
             return
         saved = session_mod.load(self._session_root).image_provider
         if not saved:
+            return
+        if saved == "none":
+            # User explicitly turned image generation off on a prior
+            # session — restore the sentinel so the auto-wire stays
+            # skipped at startup. The slot itself stays empty.
+            self._image_provider_label = "none"
             return
         if saved == "openai":
             key = keyring_store.load_key("openai")
@@ -1151,10 +1180,16 @@ def _cmd_image_model(repl: Repl, args: str) -> None:
 
 def _print_image_model_status(repl: Repl) -> None:
     c = repl._console
-    if repl._image_provider_label:
+    label = repl._image_provider_label
+    if label == "none":
         c.print(
-            f"Image provider: [green]{repl._image_provider_label}[/green] "
-            "(explicit)."
+            "Image provider: [yellow]explicitly off[/yellow] (set via "
+            "``/image-model none``). The agent can't generate cover or "
+            "page illustrations until this is changed."
+        )
+    elif label:
+        c.print(
+            f"Image provider: [green]{label}[/green] (explicit)."
         )
     elif repl._image_provider is not None:
         # Auto-wired from a chat=OpenAI session.
@@ -1179,7 +1214,13 @@ def _print_image_model_status(repl: Repl) -> None:
 def _clear_image_model(repl: Repl) -> None:
     had_one = repl._image_provider is not None
     repl._image_provider = None
-    repl._image_provider_label = None
+    # Sentinel label ``"none"`` marks the clear as EXPLICIT so the
+    # backwards-compat auto-wire in ``_refresh_image_provider`` skips
+    # it on chat=OpenAI sessions. Without the sentinel, ``label is
+    # None`` would be indistinguishable from "never configured" and
+    # the next ``_build_agent`` call would silently re-populate the
+    # slot from the chat key, undoing the user's explicit off.
+    repl._image_provider_label = "none"
     repl._agent = repl._build_agent()
     repl._persist()
     if had_one:

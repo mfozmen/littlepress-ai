@@ -197,12 +197,22 @@ def _interactive_repl(
 def test_image_model_command_with_no_arg_shows_current_state(tmp_path):
     """``/image-model`` alone reports the current image-provider
     state. On a fresh Anthropic session the slot is empty — say so
-    and explain the usage."""
+    and explain the usage.
+
+    The "openai" assertion below is tight on purpose: an earlier
+    loose form (``"openai" in out_lower``) silently passed because
+    the unconditional usage hint contains the literal phrase
+    ``/image-model openai`` regardless of current state — so the
+    test would still pass even if the current-state line broke.
+    Pinning the literal command form ``"/image-model openai"``
+    means the assertion only holds when the usage block actually
+    rendered, not from any prose mentioning "openai" in passing.
+    Same recurring vacuous-assertion pattern as PR #87."""
     repl, buf = _interactive_repl(tmp_path, inputs=["/image-model", "/exit"])
     repl.run()
 
     out = buf.getvalue()
-    # Status surfaces "not set" / "none" / similar.
+    # Status line surfaces "not configured" — the empty-state signal.
     out_lower = out.lower()
     assert (
         "no image" in out_lower
@@ -210,8 +220,13 @@ def test_image_model_command_with_no_arg_shows_current_state(tmp_path):
         or "none configured" in out_lower
         or "not configured" in out_lower
     ), f"/image-model with no arg must surface an empty-state status: {out!r}"
-    # Usage hint surfaces the OpenAI option.
-    assert "openai" in out_lower
+    # Usage hint surfaces the literal ``/image-model openai`` command —
+    # not just the substring "openai" which a stale current-state line
+    # could carry without the hint rendering at all.
+    assert "/image-model openai" in out, (
+        f"/image-model with no arg must print the literal usage hint "
+        f"line containing /image-model openai; got {out!r}"
+    )
 
 
 def test_image_model_openai_prompts_for_key_and_sets_slot(tmp_path):
@@ -272,8 +287,49 @@ def test_image_model_none_clears_the_slot(tmp_path):
     repl.run()
 
     assert repl._image_provider is None
-    assert repl._image_provider_label is None
     assert "generate_cover_illustration" not in _tool_names(repl)
+
+
+def test_image_model_none_actually_clears_when_chat_is_openai(tmp_path):
+    """Regression for the #1 bug surfaced by PR #88's reviewer:
+    when chat=OpenAI is active, ``/image-model none`` set the
+    label back to ``None`` and rebuilt the agent — but
+    ``_refresh_image_provider`` saw ``label is None`` + chat=openai
+    + key and AUTO-WIRED the slot AGAIN from the chat key, undoing
+    the clear. The user got a green "Image provider cleared"
+    message but the image tools were still registered.
+
+    The fix must make ``/image-model none`` an EXPLICIT off state
+    that auto-wire respects — e.g. a sentinel label ``"none"``
+    that ``_refresh_image_provider`` reads as "explicitly off, do
+    not auto-wire". Pinned here so the bug can't sneak back in."""
+    # Seed with chat=OpenAI + key — the original auto-wire fires.
+    repl, _ = _interactive_repl(
+        tmp_path,
+        inputs=[
+            "/image-model none",
+            "/exit",
+        ],
+        chat_provider="openai",
+        chat_key="sk-openai-chat-test",
+    )
+    # Sanity: auto-wire populated the slot at construction time.
+    assert repl._image_provider is not None, (
+        "fixture precondition: chat=OpenAI auto-wires the slot"
+    )
+    assert "generate_cover_illustration" in _tool_names(repl)
+
+    repl.run()
+
+    # The clear must STICK even on a chat=OpenAI session — the
+    # explicit user choice ("off") wins over the implicit auto-
+    # wire.
+    assert repl._image_provider is None, (
+        "/image-model none must clear the slot even when chat is "
+        "OpenAI; auto-wire must respect the explicit off choice"
+    )
+    assert "generate_cover_illustration" not in _tool_names(repl)
+    assert "generate_page_illustration" not in _tool_names(repl)
 
 
 def test_image_model_setup_persists_to_session_json(tmp_path):
@@ -307,9 +363,13 @@ def test_image_model_setup_persists_to_session_json(tmp_path):
 
 
 def test_image_model_none_persists_cleared_state(tmp_path):
-    """``/image-model none`` likewise persists — a cleared
-    image-provider survives restart as cleared (not
-    re-auto-derived from a stale label)."""
+    """``/image-model none`` persists as the SENTINEL ``"none"`` so
+    the explicit-off state survives a restart. Persisting as
+    ``null`` would let the launch-time auto-wire re-fire on a
+    chat=OpenAI session and undo the clear — exactly the bug
+    fixed in this round. The sentinel is the tri-state marker
+    that distinguishes "never configured" (``null``) from
+    "explicitly off" (``"none"``)."""
     import json
 
     repl, _ = _interactive_repl(
@@ -331,8 +391,9 @@ def test_image_model_none_persists_cleared_state(tmp_path):
     session_file = tmp_path / ".book-gen" / "session.json"
     assert session_file.is_file()
     data = json.loads(session_file.read_text(encoding="utf-8"))
-    assert data.get("image_provider") is None, (
-        f"cleared state must persist as null; got {data!r}"
+    assert data.get("image_provider") == "none", (
+        f"cleared state must persist as the sentinel 'none' (so the "
+        f"next launch's auto-wire skips); got {data!r}"
     )
 
 
@@ -386,6 +447,63 @@ def test_image_model_restores_from_session_on_launch(tmp_path):
     tools = _tool_names(repl)
     assert "generate_cover_illustration" in tools
     assert "generate_page_illustration" in tools
+
+
+def test_run_rebuilds_agent_after_restoring_image_provider_from_session(tmp_path):
+    """Regression for the #3 issue surfaced by PR #88's reviewer:
+    when ``Repl(...)`` is constructed with a preset provider,
+    ``__init__`` builds the agent ONCE with the slot empty. Then
+    ``run()`` restores the image-provider label from session.json,
+    but if the agent isn't rebuilt after the restore the image
+    tools don't register until the next ``_build_agent`` trigger
+    (e.g. ``/model``).
+
+    The CLI flow doesn't hit this today (it passes
+    ``provider=None`` and ``run()`` rebuilds via ``_activate``),
+    but tests and any future direct-construction path do. Pinned
+    so ``run()`` always rebuilds after restore."""
+    import json
+
+    # Seed session.json with explicit image_provider = openai.
+    session_dir = tmp_path / ".book-gen"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "session.json").write_text(
+        json.dumps({"provider": "anthropic", "image_provider": "openai"}),
+        encoding="utf-8",
+    )
+
+    import src.keyring_store as ks
+    import src.repl as repl_mod
+
+    saved_load_key = ks.load_key
+    saved_repl_load_key = repl_mod.keyring_store.load_key
+
+    def _fake_load_key(name: str):
+        return "sk-openai-image-test" if name == "openai" else None
+
+    ks.load_key = _fake_load_key
+    repl_mod.keyring_store.load_key = _fake_load_key
+    try:
+        repl, _ = _interactive_repl(tmp_path, inputs=["/exit"])
+        # __init__ ran _build_agent with no slot — image tools absent.
+        assert "generate_cover_illustration" not in _tool_names(repl), (
+            "fixture precondition: agent built without image tools"
+        )
+
+        repl.run()
+    finally:
+        ks.load_key = saved_load_key
+        repl_mod.keyring_store.load_key = saved_repl_load_key
+
+    # After run() — restore populated the slot AND the agent was
+    # rebuilt so the image tools register.
+    assert repl._image_provider is not None
+    assert repl._image_provider_label == "openai"
+    assert "generate_cover_illustration" in _tool_names(repl), (
+        "run() must rebuild the agent after restoring the image "
+        "provider — without the rebuild, the tools stay missing "
+        "until the next _build_agent trigger"
+    )
 
 
 def test_image_model_openai_aborts_cleanly_on_empty_key(tmp_path):
