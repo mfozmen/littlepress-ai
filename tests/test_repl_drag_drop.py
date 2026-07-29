@@ -238,3 +238,53 @@ def test_slash_load_still_works_alongside_drag_drop(tmp_path):
     repl.run()
 
     assert repl.draft is not None
+
+
+def test_existing_unix_path_that_is_not_a_pdf_reaches_the_agent(tmp_path, monkeypatch):
+    """Platform-independent form of ``test_non_pdf_path_goes_to_chat``,
+    which only exercises this branch on Linux / macOS (a Windows temp
+    path doesn't start with ``/``). Any line naming a real file is a
+    path, not a slash command — it belongs to the agent."""
+    from src import repl as repl_mod
+
+    chat_calls: list[str] = []
+    slash_calls: list[str] = []
+
+    buf = io.StringIO()
+    repl = Repl(
+        read_line=_scripted([]),
+        console=Console(file=buf, force_terminal=False, width=100, no_color=True),
+        provider=find("none"),
+        session_root=tmp_path,
+    )
+    monkeypatch.setattr(repl_mod, "_path_exists", lambda _line: True)
+    monkeypatch.setattr(repl, "_dispatch_chat", lambda line: chat_calls.append(line))
+    monkeypatch.setattr(repl, "_dispatch_slash", lambda line: slash_calls.append(line))
+
+    repl._dispatch("/home/user/notes.txt")  # noqa: SLF001
+
+    assert chat_calls == ["/home/user/notes.txt"]
+    assert slash_calls == []
+
+
+def test_slash_commands_still_dispatch_when_no_such_file_exists(tmp_path):
+    """The path escape hatch must not swallow real commands: ``/help``
+    doesn't exist on disk, so it stays a slash command."""
+    repl, buf, _ = _make(tmp_path, ["/help", "/exit"])
+    repl.run()
+
+    assert "/load" in buf.getvalue(), "the /help listing must still render"
+
+
+def test_path_exists_classifier_survives_os_error(monkeypatch):
+    """Same guard as ``_looks_like_pdf_path``: a malformed path can
+    raise out of ``expanduser`` — that means "not a path", so the line
+    falls through to normal slash dispatch instead of crashing."""
+    from src import repl as repl_mod
+
+    def boom(*_a, **_kw):
+        raise OSError("bad path")
+
+    monkeypatch.setattr(repl_mod.Path, "expanduser", boom)
+
+    assert repl_mod._path_exists("/weird") is False
