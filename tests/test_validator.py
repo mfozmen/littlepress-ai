@@ -27,8 +27,10 @@ def test_ollama_rejects_when_local_daemon_is_unreachable(monkeypatch):
     — start the daemon and retry)."""
     _install_fake_ollama_checker(monkeypatch, raise_error="connection")
 
+    spec = find("ollama")
+
     with pytest.raises(validator.TransientValidationError) as exc:
-        validator.validate_key(find("ollama"), "")
+        validator.validate_key(spec, "")
     assert "ollama" in str(exc.value).lower()
 
 
@@ -37,8 +39,10 @@ def test_ollama_reports_provider_unavailable_when_sdk_missing(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "ollama", None)
 
+    spec = find("ollama")
+
     with pytest.raises(validator.ProviderUnavailable) as exc:
-        validator.validate_key(find("ollama"), "")
+        validator.validate_key(spec, "")
     assert "ollama" in str(exc.value).lower()
 
 
@@ -78,8 +82,10 @@ def test_anthropic_without_sdk_raises_provider_unavailable(monkeypatch):
     real = sys.modules.get("anthropic")
     monkeypatch.setitem(sys.modules, "anthropic", None)
 
+    spec = find("anthropic")
+
     with pytest.raises(validator.ProviderUnavailable) as exc:
-        validator.validate_key(find("anthropic"), "sk-test")
+        validator.validate_key(spec, "sk-test")
 
     msg = str(exc.value).lower()
     assert "install" in msg and "anthropic" in msg
@@ -93,8 +99,10 @@ def test_anthropic_rejects_key_when_sdk_signals_auth_error(monkeypatch):
     fake = _make_fake_anthropic(raise_error="auth")
     monkeypatch.setitem(__import__("sys").modules, "anthropic", fake)
 
+    spec = find("anthropic")
+
     with pytest.raises(validator.KeyValidationError):
-        validator.validate_key(find("anthropic"), "sk-bad")
+        validator.validate_key(spec, "sk-bad")
 
 
 def test_anthropic_billing_error_is_transient_not_auth(monkeypatch):
@@ -107,8 +115,10 @@ def test_anthropic_billing_error_is_transient_not_auth(monkeypatch):
     fake = _make_fake_anthropic(raise_error="billing")
     monkeypatch.setitem(__import__("sys").modules, "anthropic", fake)
 
+    spec = find("anthropic")
+
     with pytest.raises(validator.TransientValidationError) as exc:
-        validator.validate_key(find("anthropic"), "sk-fine-but-broke")
+        validator.validate_key(spec, "sk-fine-but-broke")
 
     assert "credit balance" in str(exc.value).lower()
     # Crucially: not a KeyValidationError — resume mustn't delete the key.
@@ -122,8 +132,10 @@ def test_anthropic_transient_api_error_does_not_crash(monkeypatch):
     fake = _make_fake_anthropic(raise_error="rate_limit")
     monkeypatch.setitem(__import__("sys").modules, "anthropic", fake)
 
+    spec = find("anthropic")
+
     with pytest.raises(validator.TransientValidationError) as exc:
-        validator.validate_key(find("anthropic"), "sk-test")
+        validator.validate_key(spec, "sk-test")
 
     assert "rate limit" in str(exc.value).lower()
 
@@ -216,8 +228,10 @@ def test_google_without_sdk_raises_provider_unavailable(monkeypatch):
     monkeypatch.setitem(sys.modules, "google", None)
     monkeypatch.setitem(sys.modules, "google.genai", None)
 
+    spec = find("google")
+
     with pytest.raises(validator.ProviderUnavailable) as exc:
-        validator.validate_key(find("google"), "key")
+        validator.validate_key(spec, "key")
     msg = str(exc.value).lower()
     assert "google-genai" in msg and "install" in msg
 
@@ -225,15 +239,19 @@ def test_google_without_sdk_raises_provider_unavailable(monkeypatch):
 def test_google_rejects_key_on_api_key_not_valid_message(monkeypatch):
     _install_fake_google(monkeypatch, raise_error="auth")
 
+    spec = find("google")
+
     with pytest.raises(validator.KeyValidationError):
-        validator.validate_key(find("google"), "key-bad")
+        validator.validate_key(spec, "key-bad")
 
 
 def test_google_rejects_key_on_401_status(monkeypatch):
     _install_fake_google(monkeypatch, raise_error="status_401")
 
+    spec = find("google")
+
     with pytest.raises(validator.KeyValidationError):
-        validator.validate_key(find("google"), "key-bad")
+        validator.validate_key(spec, "key-bad")
 
 
 def test_google_rejects_key_on_client_error_400(monkeypatch):
@@ -272,8 +290,10 @@ def test_google_rejects_key_on_client_error_400(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.genai", genai_mod)
     monkeypatch.setitem(sys.modules, "google.genai.errors", errors_mod)
 
+    spec = find("google")
+
     with pytest.raises(validator.KeyValidationError):
-        validator.validate_key(find("google"), "key-bad")
+        validator.validate_key(spec, "key-bad")
 
 
 def test_google_billing_or_quota_error_is_transient(monkeypatch):
@@ -281,8 +301,10 @@ def test_google_billing_or_quota_error_is_transient(monkeypatch):
     it from the keyring on resume."""
     _install_fake_google(monkeypatch, raise_error="billing")
 
+    spec = find("google")
+
     with pytest.raises(validator.TransientValidationError):
-        validator.validate_key(find("google"), "key-good")
+        validator.validate_key(spec, "key-good")
 
 
 def test_google_accepts_key_when_call_returns_normally(monkeypatch):
@@ -376,8 +398,10 @@ def test_openai_without_sdk_raises_provider_unavailable(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "openai", None)
 
+    spec = find("openai")
+
     with pytest.raises(validator.ProviderUnavailable) as exc:
-        validator.validate_key(find("openai"), "sk-test")
+        validator.validate_key(spec, "sk-test")
     msg = str(exc.value).lower()
     assert "openai" in msg and "install" in msg
 
@@ -385,8 +409,10 @@ def test_openai_without_sdk_raises_provider_unavailable(monkeypatch):
 def test_openai_rejects_key_when_sdk_signals_auth_error(monkeypatch):
     _install_fake_openai(monkeypatch, raise_error="auth")
 
+    spec = find("openai")
+
     with pytest.raises(validator.KeyValidationError):
-        validator.validate_key(find("openai"), "sk-bad")
+        validator.validate_key(spec, "sk-bad")
 
 
 def test_openai_billing_is_transient_not_auth(monkeypatch):
@@ -394,15 +420,19 @@ def test_openai_billing_is_transient_not_auth(monkeypatch):
     resume must KEEP the saved key, so it's TransientValidationError."""
     _install_fake_openai(monkeypatch, raise_error="bad_request")
 
+    spec = find("openai")
+
     with pytest.raises(validator.TransientValidationError):
-        validator.validate_key(find("openai"), "sk-good")
+        validator.validate_key(spec, "sk-good")
 
 
 def test_openai_rate_limit_is_transient(monkeypatch):
     _install_fake_openai(monkeypatch, raise_error="rate")
 
+    spec = find("openai")
+
     with pytest.raises(validator.TransientValidationError):
-        validator.validate_key(find("openai"), "sk-good")
+        validator.validate_key(spec, "sk-good")
 
 
 def test_openai_accepts_key_when_sdk_returns_normally(monkeypatch):
