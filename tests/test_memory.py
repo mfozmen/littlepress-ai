@@ -369,3 +369,22 @@ def test_v1_draft_json_loads_as_all_visible(tmp_path):
 
     assert draft is not None
     assert all(not p.hidden for p in draft.pages)
+
+
+def test_load_draft_returns_none_when_a_field_has_the_wrong_type(tmp_path):
+    """A hand-edited (or partially-written) draft.json whose fields
+    carry the right names but the wrong shapes must degrade to a
+    fresh ingest, not crash the launch. ``pages`` as a dict of dicts
+    makes ``_from_dict`` raise inside the comprehension."""
+    import json
+    from src.memory import load_draft
+
+    root = tmp_path
+    (root / ".book-gen").mkdir(parents=True)
+    pdf = root / "input.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    (root / ".book-gen" / "draft.json").write_text(
+        json.dumps({"version": 1, "source_pdf": str(pdf), "pages": [["not", "a", "dict"]]})
+    )
+
+    assert load_draft(root, expected_source=pdf) is None
