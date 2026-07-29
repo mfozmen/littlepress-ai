@@ -43,8 +43,10 @@ def _fake_anthropic_module(reply_text="hello from claude"):
 
 
 def test_null_provider_chat_raises():
+    provider = NullProvider()
+
     with pytest.raises(NotImplementedError):
-        NullProvider().chat([{"role": "user", "content": "hi"}])
+        provider.chat([{"role": "user", "content": "hi"}])
 
 
 def test_anthropic_provider_returns_reply_text(monkeypatch):
@@ -192,8 +194,10 @@ def test_null_provider_turn_raises():
         input_schema={"type": "object", "properties": {}},
         handler=lambda _i: "ok",
     )
+    provider = NullProvider()
+
     with pytest.raises(NotImplementedError):
-        NullProvider().turn([], [tool])
+        provider.turn([], [tool])
 
 
 def test_anthropic_provider_turn_returns_text_response(monkeypatch):
@@ -519,8 +523,10 @@ def test_google_provider_without_sdk_raises_import_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "google", None)
     monkeypatch.setitem(sys.modules, "google.genai", None)
 
+    provider = GoogleProvider(api_key="k")
+
     with pytest.raises(ImportError):
-        GoogleProvider(api_key="k").chat([{"role": "user", "content": "hi"}])
+        provider.chat([{"role": "user", "content": "hi"}])
 
 
 def test_google_provider_turn_returns_text_response(monkeypatch):
@@ -926,8 +932,10 @@ def test_openai_provider_chat_handles_empty_content_gracefully(monkeypatch):
 def test_openai_provider_without_sdk_raises_import_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "openai", None)
 
+    provider = OpenAIProvider(api_key="k")
+
     with pytest.raises(ImportError):
-        OpenAIProvider(api_key="k").chat([{"role": "user", "content": "hi"}])
+        provider.chat([{"role": "user", "content": "hi"}])
 
 
 def test_openai_provider_turn_returns_text_response(monkeypatch):
@@ -1258,8 +1266,10 @@ def test_ollama_provider_chat_translates_plain_string_messages_unchanged(monkeyp
 def test_ollama_provider_without_sdk_raises_import_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "ollama", None)
 
+    provider = OllamaProvider()
+
     with pytest.raises(ImportError):
-        OllamaProvider().chat([{"role": "user", "content": "hi"}])
+        provider.chat([{"role": "user", "content": "hi"}])
 
 
 def test_ollama_provider_chat_handles_none_content_gracefully(monkeypatch):

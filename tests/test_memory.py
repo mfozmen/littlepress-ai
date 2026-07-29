@@ -125,8 +125,10 @@ def test_save_cleans_up_tmp_file_when_serialization_fails(tmp_path, monkeypatch)
 
     monkeypatch.setattr(memory.json, "dump", boom)
 
+    draft = _make_draft(tmp_path)
+
     with pytest.raises(RuntimeError):
-        memory.save_draft(tmp_path, _make_draft(tmp_path))
+        memory.save_draft(tmp_path, draft)
 
     book_dir = tmp_path / ".book-gen"
     if book_dir.exists():
