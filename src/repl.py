@@ -89,6 +89,16 @@ def _unquote(s: str) -> str:
     return s
 
 
+def _path_exists(line: str) -> bool:
+    """True if ``line`` names something that exists on disk. Same
+    OSError guard as ``_looks_like_pdf_path`` — a malformed path is
+    "not a path", never a crash."""
+    try:
+        return Path(_unquote(line.strip())).expanduser().exists()
+    except OSError:
+        return False
+
+
 def _looks_like_pdf_path(line: str) -> bool:
     """True if ``line`` resolves to an existing ``.pdf`` file.
 
@@ -1006,6 +1016,13 @@ class Repl:
         # so real slash commands like ``/help`` don't match.
         if _looks_like_pdf_path(line):
             return _cmd_load(self, line)
+        # Same collision, non-PDF half: on Linux / macOS ANY absolute
+        # path starts with ``/``, so a dragged .txt (or a chat line
+        # naming one — "what's in /home/me/notes.txt?") was answered
+        # with "unknown command" instead of reaching the agent. A path
+        # that exists on disk is never a slash command; send it to chat.
+        if line.startswith("/") and _path_exists(line):
+            return self._dispatch_chat(line)
         if line.startswith("/"):
             return self._dispatch_slash(line)
         return self._dispatch_chat(line)
