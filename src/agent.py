@@ -65,10 +65,6 @@ class Agent:
         self._console = console
         self._messages: list[dict] = []
 
-    @property
-    def messages(self) -> list[dict]:
-        return self._messages
-
     def say(self, user_text: str) -> None:
         """Append a user message and drive the loop until the LLM stops."""
         self._messages.append({"role": "user", "content": user_text})

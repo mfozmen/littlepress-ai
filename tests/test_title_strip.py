@@ -448,3 +448,42 @@ def test_module_docstring_calibration_ratios_are_accurate():
         )
         - 0.7941
     ) < 1e-4
+
+
+# --- helper edge cases -------------------------------------------------
+
+
+def test_match_header_line_count_is_zero_for_blank_text():
+    """A page whose text is only whitespace has no header candidate
+    lines at all — nothing to match, nothing to strip."""
+    from src.title_strip import _match_header_line_count
+
+    assert _match_header_line_count("\n   \n\n", "Yavru Dinazor") == 0
+
+
+def test_drop_leading_lines_is_identity_for_zero_lines():
+    """``n_nonempty <= 0`` means no header matched — the page text
+    must come back byte-for-byte (preserve-child-voice)."""
+    from src.title_strip import _drop_leading_lines
+
+    text = "  keep\n\nevery byte  \n"
+    assert _drop_leading_lines(text, 0) == text
+
+
+def test_drop_leading_lines_is_identity_when_text_has_too_few_lines():
+    """Asking to drop more non-empty lines than the text has leaves
+    the text untouched rather than returning an empty page."""
+    from src.title_strip import _drop_leading_lines
+
+    text = "only one line"
+    assert _drop_leading_lines(text, 3) == text
+
+
+def test_looks_like_title_is_false_when_either_side_normalises_to_empty():
+    """Punctuation-only OCR noise normalises to the empty string; it
+    must never be treated as a title match (which would silently eat
+    a real page line)."""
+    from src.title_strip import _looks_like_title
+
+    assert _looks_like_title("!!! ---", "Yavru Dinazor") is False
+    assert _looks_like_title("Yavru Dinazor", "***") is False

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -136,12 +137,12 @@ class OpenAIImageProvider:
 def _atomic_write_bytes(output_path: Path, data: bytes) -> None:
     """Write ``data`` to ``output_path`` atomically.
 
-    Matches the pattern used by ``src/memory.py`` and
-    ``src/draft.py::atomic_copy``: write to a sibling ``.tmp`` file,
-    then ``os.replace`` to the final name so readers never see partial
-    content. On failure (disk full, OS error), the ``.tmp`` file is
-    cleaned up and the exception re-raised as ``ImageGenerationError``
-    so every generate() failure mode exits through one door.
+    Matches the pattern used by ``src/memory.py``: write to a sibling
+    ``.tmp`` file, then ``os.replace`` to the final name so readers
+    never see partial content. On failure (disk full, OS error), the
+    ``.tmp`` file is cleaned up and the exception re-raised as
+    ``ImageGenerationError`` so every generate() failure mode exits
+    through one door.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
@@ -150,10 +151,8 @@ def _atomic_write_bytes(output_path: Path, data: bytes) -> None:
         os.replace(tmp_path, output_path)
     except OSError as e:
         # Best-effort cleanup; a leftover .tmp is harmless but ugly.
-        try:
+        with suppress(OSError):
             tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise ImageGenerationError(
             f"Could not write image to {output_path}: {e}"
         ) from e

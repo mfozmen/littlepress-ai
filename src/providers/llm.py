@@ -362,8 +362,6 @@ def _import_google_genai():
             "The 'google-genai' SDK is missing. Try: "
             "pip install --force-reinstall littlepress-ai"
         ) from e
-    if genai is None or gtypes is None:
-        raise ImportError("google-genai SDK is not available")
     return genai, gtypes
 
 
@@ -624,8 +622,6 @@ def _import_openai():
             "The 'openai' SDK is missing. Try: "
             "pip install --force-reinstall littlepress-ai"
         ) from e
-    if openai is None:
-        raise ImportError("openai SDK is not available")
     return openai
 
 

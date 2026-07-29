@@ -191,3 +191,24 @@ def test_cli_unreadable_pdf_reports_error(tmp_path, monkeypatch, capsys):
     exit_code = cli.main([str(bad)])
     assert exit_code != 0
     assert "could not read" in capsys.readouterr().out.lower()
+
+
+def test_restore_skips_legacy_lookup_when_the_pdf_was_already_in_input(tmp_path):
+    """Re-running with the collected path (``.book-gen/input/...``)
+    means ``collect_input_pdf`` was a no-op, so there is no legacy
+    absolute path to migrate from — one memory lookup, then a fresh
+    ingest."""
+    lookups = []
+
+    class _Memory:
+        @staticmethod
+        def load_draft(_root, expected_source):
+            lookups.append(expected_source)
+            return None
+
+    pdf = tmp_path / ".book-gen" / "input" / "draft-abc.pdf"
+
+    result = cli._restore_saved_draft_or_migrate(tmp_path, pdf, pdf, _Memory)
+
+    assert result is None
+    assert lookups == [pdf], "the legacy-path lookup must be skipped"

@@ -1456,3 +1456,58 @@ def test_ollama_provider_turn_passes_bounded_timeout(monkeypatch):
     client = fake.Client.last_client
     assert client.timeout is not None
     assert 0 < client.timeout <= 600
+
+
+# --- response-parsing edge cases ---------------------------------------
+
+
+def test_collect_text_from_candidates_is_empty_without_candidates():
+    """A SAFETY-blocked Gemini response carries no candidates at all —
+    the extractor returns "" instead of raising, so the REPL prints an
+    empty reply rather than a traceback."""
+    from src.providers.llm import _collect_text_from_candidates
+
+    assert _collect_text_from_candidates(types.SimpleNamespace(candidates=[])) == ""
+    assert _collect_text_from_candidates(types.SimpleNamespace()) == ""
+
+
+def test_gemini_blocks_skip_parts_that_are_neither_text_nor_function_call():
+    """Gemini can return thought/metadata parts with no text and no
+    function_call. Those are skipped, not turned into empty blocks."""
+    from src.providers.llm import _gemini_response_to_blocks
+
+    empty_part = types.SimpleNamespace(text=None, function_call=None)
+    text_part = types.SimpleNamespace(text="hi", function_call=None)
+    response = types.SimpleNamespace(
+        candidates=[
+            types.SimpleNamespace(
+                content=types.SimpleNamespace(parts=[empty_part, text_part]),
+                finish_reason=None,
+            )
+        ]
+    )
+
+    blocks, stop_reason = _gemini_response_to_blocks(response)
+
+    assert blocks == [{"type": "text", "text": "hi"}]
+    assert stop_reason == "end_turn"
+
+
+def test_openai_provider_chat_returns_empty_string_without_choices(monkeypatch):
+    """``choices`` comes back empty on some filtered completions —
+    return "" rather than IndexError-ing out of the REPL."""
+    from src.providers import llm as llm_mod
+
+    class Completions:
+        def create(self, **_kwargs):
+            return types.SimpleNamespace(choices=[])
+
+    class Client:
+        def __init__(self, **_kw):
+            self.chat = types.SimpleNamespace(completions=Completions())
+
+    module = types.ModuleType("openai")
+    module.OpenAI = Client
+    monkeypatch.setattr(llm_mod, "_import_openai", lambda: module)
+
+    assert OpenAIProvider(api_key="sk-test").chat([{"role": "user", "content": "hi"}]) == ""

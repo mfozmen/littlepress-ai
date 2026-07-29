@@ -65,11 +65,6 @@ def validate_key(spec: ProviderSpec, api_key: str) -> None:
     checker(spec, api_key)
 
 
-def _unchecked(_spec: ProviderSpec, _api_key: str) -> None:
-    """Placeholder for providers that haven't gotten a ping yet."""
-    return None
-
-
 def _check_anthropic(spec: ProviderSpec, api_key: str) -> None:
     try:
         import anthropic  # type: ignore[import-not-found]

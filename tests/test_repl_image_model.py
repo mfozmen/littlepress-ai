@@ -526,3 +526,115 @@ def test_image_model_openai_aborts_cleanly_on_empty_key(tmp_path):
     assert repl._image_provider_label is None
     # Some indication that the call was aborted.
     assert "aborted" in out_lower or "cancel" in out_lower or "no key" in out_lower
+
+
+# --- session restore edge cases ----------------------------------------
+
+
+def test_explicit_off_survives_a_restart(tmp_path):
+    """``/image-model none`` persists the ``"none"`` sentinel. On the
+    next launch the sentinel comes back so the chat=OpenAI auto-wire
+    stays skipped — the user's explicit off isn't silently undone."""
+    from src import session as session_mod
+
+    session_mod.save(
+        tmp_path, session_mod.Session(provider="openai", image_provider="none")
+    )
+    repl = _repl(tmp_path, provider_name="anthropic", api_key="sk-ant-test")
+
+    repl._restore_image_provider_from_session()
+
+    assert repl._image_provider is None
+    assert repl._image_provider_label == "none"
+
+
+def test_saved_openai_image_provider_without_a_stored_key_stays_empty(tmp_path):
+    """The session remembers openai but the key is gone (``/logout``,
+    cleared keychain). Leave the slot empty rather than constructing a
+    provider that would 401 on the first illustration."""
+    from src import session as session_mod
+
+    session_mod.save(
+        tmp_path, session_mod.Session(provider="anthropic", image_provider="openai")
+    )
+    repl = _repl(tmp_path, provider_name="anthropic", api_key="sk-ant-test")
+
+    repl._restore_image_provider_from_session()
+
+    assert repl._image_provider is None
+
+
+# --- /image-model status + error surfaces -------------------------------
+
+
+def test_image_model_rejects_an_unknown_provider_name(tmp_path):
+    repl, buf = _interactive_repl(tmp_path, inputs=["/image-model dall-e", "/exit"])
+
+    repl.run()
+
+    out = buf.getvalue()
+    assert "dall-e" in out
+    assert "/image-model openai" in out
+    assert repl._image_provider is None
+
+
+def test_image_model_status_reports_explicit_off(tmp_path):
+    repl, buf = _interactive_repl(
+        tmp_path, inputs=["/image-model none", "/image-model", "/exit"]
+    )
+
+    repl.run()
+
+    assert "off" in buf.getvalue().lower()
+
+
+def test_image_model_status_reports_the_explicit_provider(tmp_path):
+    repl, buf = _interactive_repl(tmp_path, inputs=["/image-model", "/exit"])
+    repl._image_provider = _FakeImageProvider()
+    repl._image_provider_label = "openai"
+
+    repl.run()
+
+    out = buf.getvalue()
+    assert "openai" in out and "explicit" in out.lower()
+
+
+def test_image_model_status_reports_the_auto_wired_provider(tmp_path):
+    """chat=OpenAI auto-wires the image slot without a label. The
+    status line must say so instead of claiming nothing is set."""
+    repl, buf = _interactive_repl(
+        tmp_path,
+        inputs=["/image-model", "/exit"],
+        chat_provider="openai",
+        chat_key="sk-openai-test",
+    )
+
+    repl.run()
+
+    assert repl._image_provider_label is None
+    assert "auto-derived" in buf.getvalue().lower()
+
+
+def test_image_model_none_on_an_empty_slot_says_nothing_was_set(tmp_path):
+    repl, buf = _interactive_repl(tmp_path, inputs=["/image-model none", "/exit"])
+
+    repl.run()
+
+    assert "no image provider was set" in buf.getvalue().lower()
+    assert repl._image_provider_label == "none"
+
+
+def test_image_model_openai_reports_a_build_without_the_openai_provider(
+    tmp_path, monkeypatch
+):
+    """Defensive: if the openai spec ever disappears from the provider
+    registry, say so instead of crashing on ``None.display_name``."""
+    from src import repl as repl_mod
+
+    repl, buf = _interactive_repl(tmp_path, inputs=["/image-model openai", "/exit"])
+    monkeypatch.setattr(repl_mod, "find", lambda _name: None)
+
+    repl.run()
+
+    assert "isn't available" in buf.getvalue()
+    assert repl._image_provider is None
