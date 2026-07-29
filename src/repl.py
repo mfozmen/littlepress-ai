@@ -744,8 +744,7 @@ class Repl:
                 return
             self._image_provider = OpenAIImageProvider(api_key=key)
             self._image_provider_label = "openai"
-            return
-        # Future image-provider names land here.
+        # Future image-provider names fall through here.
 
     def _resume_or_pick(self) -> tuple[ProviderSpec, str | None] | None:
         """Try to restore the saved provider (with its stored key if any);
@@ -1453,9 +1452,8 @@ def _run_default_render(
     if not _render_to_file(repl, source_dir, a5):
         return
     repl._console.print(f"[green]Wrote[/green] {a5}")
-    if impose:
-        if _impose_to_file(repl, a5, booklet):
-            repl._console.print(f"[green]Wrote[/green] {booklet}")
+    if impose and _impose_to_file(repl, a5, booklet):
+        repl._console.print(f"[green]Wrote[/green] {booklet}")
     _auto_prune(repl, source_dir)
 
 

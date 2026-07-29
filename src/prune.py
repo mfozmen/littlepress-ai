@@ -30,6 +30,7 @@ What is never touched:
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -172,19 +173,15 @@ def _prune(
         report.snapshots_removed = excess_snapshots(output_dir, slug, keep=keep)
 
     for path in (*report.images_removed, *report.snapshots_removed):
-        try:
+        # Missing stat is benign — just don't count it.
+        with suppress(OSError):
             report.bytes_freed += path.stat().st_size
-        except OSError:
-            # Missing stat is benign — just don't count it.
-            pass
 
     if not dry_run:
         for path in (*report.images_removed, *report.snapshots_removed):
-            try:
+            # A locked file on Windows (PDF open in a viewer) is the
+            # main realistic failure. Skip and move on; the next
+            # prune will catch it.
+            with suppress(OSError):
                 path.unlink()
-            except OSError:
-                # A locked file on Windows (PDF open in a viewer) is the
-                # main realistic failure. Skip and move on; the next
-                # prune will catch it.
-                pass
     return report

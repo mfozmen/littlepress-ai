@@ -252,3 +252,25 @@ def test_ingest_no_op_on_null_provider(tmp_path):
         f"call; errors leaking in means the guard regressed: "
         f"{report.errors!r}"
     )
+
+
+def test_ingest_records_error_when_vision_raises(tmp_path):
+    """A page whose extracted drawing has since been deleted makes
+    ``_build_image_block`` raise before the provider is ever called.
+    Ingestion must record it as a per-page error and keep going —
+    one broken page can't abort the whole load."""
+    from src.ingestion import ingest_image_only_pages
+
+    missing = tmp_path / ".book-gen" / "images" / "page-01.png"
+    good = _tiny_png(tmp_path / ".book-gen" / "images" / "page-02.png")
+    draft = Draft(
+        source_pdf=tmp_path / "draft.pdf",
+        pages=[DraftPage(text="", image=missing), DraftPage(text="", image=good)],
+    )
+    llm = _ScriptedLLM(["<TEXT>\nstill fine"])
+
+    report = ingest_image_only_pages(draft, llm, _console())
+
+    assert len(report.errors) == 1
+    assert draft.pages[0].text == ""
+    assert draft.pages[1].text == "still fine"

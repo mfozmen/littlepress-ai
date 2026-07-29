@@ -4088,3 +4088,100 @@ def test_read_draft_marks_hidden_pages(tmp_path):
     assert "[hidden]" in page2_line
     page1_line = next(l for l in lines if l.strip().startswith("Page 1"))
     assert "[hidden]" not in page1_line
+
+
+# --- transcription plumbing edge cases ---------------------------------
+
+
+def test_call_vision_for_transcription_reports_missing_sdk(tmp_path):
+    """An ImportError out of ``chat`` means the provider's SDK isn't
+    installed — that gets its own message so the agent tells the user
+    to install rather than to switch to a multimodal model."""
+    from PIL import Image
+
+    from src.agent_tools import call_vision_for_transcription
+
+    img = tmp_path / "page-01.png"
+    Image.new("RGB", (20, 20), (1, 2, 3)).save(img)
+
+    class _NoSDK:
+        def chat(self, _messages):
+            raise ImportError("No module named 'anthropic'")
+
+    reply, error = call_vision_for_transcription(_NoSDK(), img, 1)
+
+    assert reply == ""
+    assert "SDK not installed" in error
+    assert "page 1" in error
+
+
+def test_run_ocr_engine_rejects_unknown_method(tmp_path):
+    """``method`` is validated at the tool boundary; an unknown engine
+    name comes back as a tool-result error listing the valid ones."""
+    from src.agent_tools import _run_ocr_engine
+    from src.draft import DraftPage
+
+    page = DraftPage(text="", image=tmp_path / "page-01.png")
+
+    reply, error = _run_ocr_engine("magic", {}, page, 1, lambda: None)
+
+    assert reply == ""
+    assert "magic" in error
+    assert "vision" in error and "tesseract" in error
+
+
+def test_build_image_block_defaults_to_png_for_unknown_extension(tmp_path):
+    """``pdf_ingest`` names extracted drawings after the embedded
+    stream's format; an extension mimetypes can't map must still
+    produce a valid image block instead of a None media_type."""
+    from PIL import Image
+
+    from src.agent_tools import _build_image_block
+
+    img = tmp_path / "page-01.weird"
+    Image.new("RGB", (20, 20), (4, 5, 6)).save(img, format="PNG")
+
+    block = _build_image_block(img)
+
+    assert block["source"]["media_type"] == "image/png"
+
+
+def test_transcribe_page_mixed_sentinel_swaps_in_an_extracted_drawing(tmp_path):
+    """<MIXED> on a page whose raster DOES yield a clean drawing
+    region: the isolated drawing replaces ``page.image`` and the page
+    goes back to ``image-top`` (transcription on top, drawing below,
+    no duplicate text). The original raster stays on disk so
+    ``restore_page`` can undo it."""
+    from PIL import Image, ImageDraw
+
+    from src.agent_tools import transcribe_page_tool
+
+    # Typed-text rows up top, one solid drawing block below — the
+    # shape ``extract_drawing_region`` is built to split.
+    img = Image.new("RGB", (400, 800), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    for y in range(40, 100, 20):
+        draw.rectangle([40, y, 360, y + 4], fill=(0, 0, 0))
+    draw.rectangle([50, 200, 350, 760], fill=(0, 0, 0))
+    source = tmp_path / "page-01.png"
+    img.save(source)
+
+    draft = Draft(
+        source_pdf=tmp_path / "x.pdf",
+        title="Book",
+        author="A",
+        pages=[DraftPage(text="", image=source, layout="text-only")],
+    )
+    tool = transcribe_page_tool(
+        get_draft=lambda: draft,
+        get_llm=lambda: _FakeLLM(reply="<MIXED>\nKüçük dinozor ormana gitti"),
+    )
+
+    result = tool.handler({"page": 1})
+
+    assert draft.pages[0].text == "Küçük dinozor ormana gitti"
+    assert draft.pages[0].image != source
+    assert draft.pages[0].image.is_file()
+    assert draft.pages[0].layout == "image-top"
+    assert source.is_file(), "the original raster must survive for restore_page"
+    assert "drawing extracted" in result

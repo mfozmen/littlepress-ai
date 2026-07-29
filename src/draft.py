@@ -13,7 +13,6 @@ ingestion path just copies what ``src/pdf_ingest`` returned.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -133,28 +132,6 @@ def collect_input_pdf(source: Path, session_root: Path) -> Path:
         return destination
     shutil.copyfile(source, destination)
     return destination
-
-
-def atomic_copy(src: Path, dst: Path) -> None:
-    """Copy ``src`` onto ``dst`` atomically.
-
-    Plain ``shutil.copyfile`` opens ``dst`` in truncate mode and streams
-    bytes — if the process is interrupted mid-copy (disk full, power
-    loss, Ctrl-C) the destination is left half-written. The auto-opener
-    downstream would then hand that corrupt file to the user's PDF
-    viewer. Instead we write to a ``<dst>.tmp`` sibling and
-    ``os.replace`` it into position. Rename within the same filesystem
-    is atomic on both POSIX and Windows, so observers either see the
-    old ``dst`` or the fully-written new one — never a half.
-
-    On Windows, ``os.replace`` raises ``PermissionError`` if ``dst`` is
-    currently open for exclusive access (e.g. an open PDF viewer);
-    callers handle that separately so a live viewer doesn't erase a
-    successful render from the user's perspective.
-    """
-    tmp = dst.with_suffix(dst.suffix + ".tmp")
-    shutil.copyfile(src, tmp)
-    os.replace(tmp, dst)
 
 
 def next_version_number(output_dir: Path, slug: str) -> int:

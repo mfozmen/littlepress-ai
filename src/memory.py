@@ -107,7 +107,10 @@ def load_draft(
         return None
     try:
         draft = _from_dict(data)
-    except (KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError):
+        # AttributeError covers a page entry that isn't a dict at all
+        # (``.get`` missing) — a hand-edited draft.json must degrade to
+        # a fresh ingest, never crash the launch.
         return None
     if expected_source is not None:
         if _resolve(draft.source_pdf) != _resolve(Path(expected_source)):

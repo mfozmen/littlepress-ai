@@ -181,5 +181,5 @@ def _restore_saved_draft_or_migrate(
     return legacy
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — `python -m src.cli` entry
     raise SystemExit(main())

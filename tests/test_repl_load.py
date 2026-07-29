@@ -477,3 +477,43 @@ def test_load_pdf_auto_ingests_image_only_pages(tmp_path):
         assert page.text.strip(), (
             f"page {i + 1} text is empty — ingestion did not populate it"
         )
+
+
+def test_load_survives_an_agent_that_fails_on_the_greeting(tmp_path, monkeypatch):
+    """The draft is already loaded by the time the agent's opening
+    turn runs. A provider failure there must surface as a message,
+    not lose the pages the user just ingested."""
+    from src import repl as repl_mod
+    from src.metadata_prompts import MetadataChoices
+    from src.providers.llm import find as find_provider
+
+    pdf = _write_pdf(tmp_path, [{"text": "once upon a time"}])
+    monkeypatch.setattr(
+        repl_mod,
+        "collect_metadata",
+        lambda *_a, **_kw: MetadataChoices(cover=None, back_cover=None),
+    )
+
+    class _StubLLM:
+        """No ``turn`` — Agent.say blows up on the first tool loop."""
+
+        def chat(self, _messages):
+            return "<BLANK>"
+
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+    repl = Repl(
+        read_line=_scripted([f"/load {pdf}", "/exit"]),
+        console=console,
+        provider=find_provider("anthropic"),
+        session_root=tmp_path,
+        llm_factory=lambda _spec, _key: _StubLLM(),
+    )
+    repl._api_key = "sk-ant-test"
+    repl._agent = repl._build_agent()
+
+    repl.run()
+
+    assert "Agent error:" in buf.getvalue()
+    assert repl.draft is not None
+    assert len(repl.draft.pages) == 1

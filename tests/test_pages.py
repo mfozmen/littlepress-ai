@@ -269,3 +269,51 @@ def test_draw_text_block_left_align(tmp_path):
     register_fonts()
     c = _canvas()
     _draw_text_block(c, "hello left", x=50, y_top=400, width=200, height=100, align="left")
+
+
+# --- draw_back_cover ------------------------------------------------------
+
+
+def test_draw_back_cover_renders_image_and_text(tmp_path):
+    """A back cover carrying the child's closing drawing draws the
+    image in the top half and the blurb underneath."""
+    from src.schema import BackCover, Book
+
+    register_fonts()
+    _image_on_disk(tmp_path, "back.png")
+    book = Book(
+        title="T",
+        back_cover=BackCover(text="the end!", image="back.png"),
+        source_dir=tmp_path,
+    )
+    c = _canvas()
+
+    pages.draw_back_cover(c, book)
+
+    c.save()
+
+
+# --- _avoid_short_orphan --------------------------------------------------
+
+
+def test_wrap_leaves_a_multi_word_last_line_alone():
+    """The orphan pull only fires for a single short token. A last
+    line that already carries several words is left exactly as the
+    greedy wrap produced it."""
+    from src.pages import _avoid_short_orphan
+    from src.config import FONT_REGULAR
+
+    lines = ["the quick brown fox", "jumps over"]
+
+    assert _avoid_short_orphan(lines, FONT_REGULAR, 14, 200) == lines
+
+
+def test_wrap_leaves_a_long_last_line_alone():
+    """A long final word isn't an orphan — pulling would only make
+    the line overflow."""
+    from src.pages import _avoid_short_orphan
+    from src.config import FONT_REGULAR
+
+    lines = ["once upon a", "extraordinarily"]
+
+    assert _avoid_short_orphan(lines, FONT_REGULAR, 14, 200) == lines

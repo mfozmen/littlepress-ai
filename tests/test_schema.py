@@ -120,3 +120,42 @@ def test_valid_cover_styles_is_a_constant_set():
 def test_cover_dataclass_has_style_field_defaulting_to_full_bleed():
     c = Cover()
     assert c.style == "full-bleed"
+
+
+def test_cover_and_back_cover_images_are_validated(tmp_path):
+    """Both cover slots participate in the missing-image check —
+    a book.json naming a cover or back-cover image that isn't on
+    disk must fail loudly at load, not at render time."""
+    path = _write_book(
+        tmp_path,
+        {
+            "title": "T",
+            "cover": {"image": "images/cover.png"},
+            "back_cover": {"image": "images/back.png"},
+        },
+    )
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        load_book(path)
+
+    assert "images/cover.png" in str(excinfo.value)
+    assert "images/back.png" in str(excinfo.value)
+
+
+def test_cover_and_back_cover_images_pass_when_present(tmp_path):
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "cover.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (tmp_path / "images" / "back.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    path = _write_book(
+        tmp_path,
+        {
+            "title": "T",
+            "cover": {"image": "images/cover.png"},
+            "back_cover": {"image": "images/back.png"},
+        },
+    )
+
+    book = load_book(path)
+
+    assert book.cover.image == "images/cover.png"
+    assert book.back_cover.image == "images/back.png"

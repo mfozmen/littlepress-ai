@@ -123,3 +123,66 @@ def test_non_slash_input_with_offline_provider_shows_placeholder():
     out = buf.getvalue()
     assert "load draft.pdf" in out
     assert "no model" in out.lower() or "/model" in out
+
+
+# --- cost-confirm gate --------------------------------------------------
+
+
+def test_confirm_defaults_to_no_on_eof():
+    """The only surviving y/n gate guards a paid API call. EOF (piped
+    stdin, closed terminal) must read as "no" — never charge the user
+    on an input the terminal never delivered."""
+    repl, _ = _make([])
+
+    assert repl._confirm("Generate an illustration (~$0.04)?") is False
+
+
+def test_confirm_accepts_yes_and_rejects_anything_else():
+    repl, _ = _make(["Y", "yes", "sure", "n"])
+
+    assert repl._confirm("spend?") is True
+    assert repl._confirm("spend?") is True
+    assert repl._confirm("spend?") is False
+    assert repl._confirm("spend?") is False
+
+
+# --- deterministic pre-agent ingestion ----------------------------------
+
+
+def test_run_ingestion_is_a_noop_without_a_draft():
+    """Nothing loaded — ingestion must not touch the provider."""
+    repl, _ = _make([])
+
+    repl._run_ingestion()  # no draft, offline provider: returns immediately
+
+    assert repl.draft is None
+
+
+def test_run_ingestion_survives_a_failing_ocr_pass(tmp_path, monkeypatch):
+    """A crash inside OCR or colophon detection can't take the load
+    path down with it — the user still gets their pages, just without
+    the transcription."""
+    from src import repl as repl_mod
+    from src.draft import Draft, DraftPage
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("vision backend exploded")
+
+    monkeypatch.setattr(repl_mod, "ingest_image_only_pages", _boom)
+    monkeypatch.setattr(repl_mod, "detect_colophon_pages", _boom)
+
+    repl, buf = _make([])
+    repl._draft = Draft(source_pdf=tmp_path / "d.pdf", pages=[DraftPage(text="hi")])
+
+    class _Stub:
+        def chat(self, _messages):
+            return ""
+
+    repl._llm = _Stub()
+
+    repl._run_ingestion()
+
+    out = buf.getvalue()
+    assert "Auto-ingestion failed" in out
+    assert "Colophon detection failed" in out
+    assert repl.draft is not None
