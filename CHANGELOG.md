@@ -1,7 +1,71 @@
 # CHANGELOG
 
 
+## v1.22.1 (2026-07-29)
+
+### Bug Fixes
+
+- **repl**: Stop treating existing Unix paths as slash commands
+  ([#91](https://github.com/mfozmen/littlepress-ai/pull/91),
+  [`8e3759f`](https://github.com/mfozmen/littlepress-ai/commit/8e3759f4c56717bc09a57fdb3e4d3843559e4f62))
+
+On Linux / macOS every absolute path starts with ``/``, so any line naming a non-PDF file — a
+  dragged .txt, or a chat question like "what's in /home/me/notes.txt?" — was parsed as an unknown
+  slash command and answered with an error instead of reaching the agent. The PDF half of this
+  collision was already handled (``_looks_like_pdf_path`` runs before slash dispatch); this closes
+  the other half: a line that names something which exists on disk is never a command, so it goes to
+  chat.
+
+``tests/test_repl_drag_drop.py::test_non_pdf_path_goes_to_chat`` has been failing on Linux since it
+  was written — the SonarCloud workflow runs pytest with ``continue-on-error: true``, so CI never
+  went red over it and it passed locally on Windows (where temp paths start with ``C:\``). The new
+  regression test monkeypatches the existence check so it reproduces on every platform.
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- **plan**: Tag remaining yavru_dinozor bugs as already-SHIPPED
+  ([#89](https://github.com/mfozmen/littlepress-ai/pull/89),
+  [`5c08910`](https://github.com/mfozmen/littlepress-ai/commit/5c08910fd68d62929ce5744c5fd1832fe4838297))
+
+Three "Next up" entries pointed at fixes that already landed in earlier PRs; the entries were not
+  trimmed when those PRs merged. Updating PLAN to reflect the actual ship state — no code change.
+
+Word-wrap orphan (PR #85, ``c1367a2`` / ``aae7e48``): entry now SHIPPED-tagged with a one-paragraph
+  summary of ``_avoid_short_ orphan`` semantics (≤ 5-char single-token threshold tuned for Turkish
+  particles + English short words, three no-op guards including the orphan-relocation guard added in
+  review-round-1).
+
+``<MIXED>`` text-only override by ``propose_layouts`` (PR #74 / commit ``880b3c7``): the protection
+  has been in ``_reject_layout_batch`` for several PRs — refuses to flip any ``(layout=text-only AND
+  image is not None)`` page away from text-only as part of a batch, rejecting the whole batch with a
+  message pointing at per-page ``choose_layout`` as the explicit-override escape hatch. Three
+  legitimate origins covered: MIXED ingestion, explicit ``choose_layout`` to text-only, and
+  ``generate_page_illustration`` without a layout override. Regression test:
+  ``test_propose_layouts_protects_intentional_text_only_with_image``.
+
+Cover override on explicit poster choice (PR #79 / commit ``f8b9a2f``): ``_build_agent_greeting``
+  injects a per-branch ``COVER STATE`` block for deterministic cover choices (``page-drawing`` /
+  ``poster``) that names the user's pick AND explicitly tells the agent ``"Do NOT call set_cover"``.
+  The poster branch specifically explains ``cover_image=None + cover_style="poster"`` is the
+  COMPLETE configuration (not a half-set cover waiting for an image). Regression tests in
+  ``tests/test_agent_greeting.py``.
+
+After these trims, every item in PLAN's "Next up" is either SHIPPED or explicitly deferred (colophon
+  name merging "Defer until a real user run shows..."; AI-only-for-judgment sub-project 3
+  ``(optional)``; spine-wrap ``"defer until a real user asks for it"``; more image providers
+  ``"follow-ups"``). The yavru_dinozor end-to-end task is structurally complete.
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v1.22.0 (2026-05-19)
+
+### Chores
+
+- **release**: 1.22.0 [skip ci]
+  ([`91623b9`](https://github.com/mfozmen/littlepress-ai/commit/91623b97972366587970105dc7dccdf627446db8))
 
 ### Features
 
