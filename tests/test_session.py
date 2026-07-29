@@ -54,8 +54,10 @@ def test_save_cleans_up_tmp_file_when_serialization_fails(tmp_path, monkeypatch)
 
     monkeypatch.setattr(session.json, "dump", explode)
 
+    to_save = session.Session(provider="anthropic")
+
     with pytest.raises(RuntimeError):
-        session.save(tmp_path, session.Session(provider="anthropic"))
+        session.save(tmp_path, to_save)
 
     # No session.json and no leftover .session.*.tmp files.
     book_dir = tmp_path / ".book-gen"
