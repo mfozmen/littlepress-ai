@@ -26,10 +26,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
 
+      # No continue-on-error: a red suite must fail the job. It used to
+      # be tolerated so the scan still uploaded coverage, but that let
+      # tests/test_repl_drag_drop.py::test_non_pdf_path_goes_to_chat sit
+      # broken on main for months (fixed in #91) — the job stayed green
+      # the whole time. Coverage from a run whose tests failed isn't
+      # worth reporting anyway.
       - name: Run tests with coverage
         run: |
-          pytest --cov=src --cov=build --cov-report=xml --cov-report=term
-        continue-on-error: true
+          pytest --cov=src --cov-report=xml --cov-report=term
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v7
