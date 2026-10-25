@@ -30,6 +30,15 @@ from src.metadata_i18n import detect_lang, t
 from src.session_log import LOGGER
 
 
+_NUDGE = (
+    "(automatic note, not from the user) Your last reply ended without a "
+    "tool call or a question, so nothing is happening. If you said you "
+    "would do something, do it now with tool calls. If you need the "
+    "user, ask them directly. If everything is finished, reply with an "
+    "empty message."
+)
+
+
 @dataclass
 class Tool:
     """A callable the agent can ask the LLM to invoke.
@@ -80,16 +89,27 @@ class Agent:
         self._drive()
 
     def _drive(self) -> None:
+        used_tools = nudged = False
         while True:
             with self._working(t("progress.thinking", detect_lang())):
                 response = self._llm.turn(self._messages, self._tool_list)
             self._messages.append({"role": "assistant", "content": response.content})
+            text = ""
             for block in response.content:
-                if block.get("type") == "text":
+                if block.get("type") == "text" and block["text"].strip():
                     LOGGER.info("assistant: %s", block["text"])
                     self._console.print(block["text"])
+                    text += block["text"]
             if response.stop_reason != "tool_use":
+                # Some models announce the next step ("I'll render now")
+                # and stop, leaving the user at an idle prompt.
+                if used_tools and not nudged and "?" not in text:
+                    nudged = True
+                    LOGGER.info("nudge: reply ended without a tool call or question")
+                    self._messages.append({"role": "user", "content": _NUDGE})
+                    continue
                 return
+            used_tools = True
             tool_results: list[dict] = []
             for block in response.content:
                 if block.get("type") != "tool_use":

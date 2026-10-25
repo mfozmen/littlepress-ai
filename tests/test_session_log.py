@@ -75,6 +75,8 @@ def test_agent_turns_and_tool_calls_are_logged(tmp_path):
             ]
 
         def turn(self, _messages, _tools):
+            if not self.responses:  # the agent's one-off "keep going" nudge
+                return AgentResponse(content=[], stop_reason="end_turn")
             return self.responses.pop(0)
 
     tool = Tool(

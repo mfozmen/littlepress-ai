@@ -145,6 +145,12 @@ _GREETING_OPENING = (
     "to execute any AI branches the user opted into, call "
     "``render_book`` once, and then drive the post-render review "
     "turn.\n\n"
+    "KEEP WORKING. Never end a reply by announcing what you will do "
+    "next — the app waits for the user as soon as you stop calling "
+    "tools, so nothing would happen. Do the work in the same turn with "
+    "tool calls. Stop only to ask the user a concrete question (for "
+    "example, approving a drafted cover prompt or blurb) or after the "
+    "render, with the review prompt.\n\n"
 )
 
 _LANGUAGE_NAMES = {"en": "English", "tr": "Turkish"}

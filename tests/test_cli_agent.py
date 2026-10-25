@@ -55,6 +55,8 @@ class _StubLLM:
         self.calls.append(
             {"messages": [m for m in messages], "tools": [t.name for t in tools]}
         )
+        if not self._responses:  # the agent's one-off "keep going" nudge
+            return AgentResponse(content=[], stop_reason="end_turn")
         return self._responses.pop(0)
 
 
@@ -80,7 +82,7 @@ def test_agent_reads_draft_and_greets_when_pdf_preloaded(tmp_path):
             ),
             AgentResponse(
                 content=[
-                    {"type": "text", "text": "Hi! I see 1 page with a drawing."}
+                    {"type": "text", "text": "Hi! I see 1 page with a drawing. Ready?"}
                 ],
                 stop_reason="end_turn",
             ),
