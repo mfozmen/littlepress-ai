@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v1.28.0 (2026-10-25)
+
+### Features
+
+- Suggest the title and author found in the draft
+  ([#105](https://github.com/mfozmen/littlepress-ai/pull/105),
+  [`846fb45`](https://github.com/mfozmen/littlepress-ai/commit/846fb451088b4689795a9d654207296d047c2158))
+
+* feat: suggest the title and author found in the draft
+
+Page one of a draft often opens with the title ("YAVRU KEDİ 1🐱") and a colophon page names the
+  author ("Yazar:Poyraz ÖZMEN"). Setup now offers those for a y/n confirm instead of asking from
+  scratch; a trailing number becomes the series volume and skips the series question. A no falls
+  back to the existing prompts.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor: parse the suggested title without backtracking regexes
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.27.1 (2026-10-25)
 
 ### Bug Fixes
@@ -15,6 +39,11 @@ A live session ended its first turn with "I'll now finish the cover and render t
   tool calls ends without a tool call or a question.
 
 Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.27.1 [skip ci]
+  ([`d2b9834`](https://github.com/mfozmen/littlepress-ai/commit/d2b98340c30474dc0fd9732641199983f5644fa0))
 
 
 ## v1.27.0 (2026-10-25)
