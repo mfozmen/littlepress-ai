@@ -140,3 +140,33 @@ def test_extract_images_uses_extension_matching_image_bytes(tmp_path):
     # Extension on disk must match the actual byte format.
     ext_to_format = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG"}
     assert ext_to_format[result[0].suffix.lower()] == saved.format
+
+
+def test_extract_images_skips_a_blank_page_background(tmp_path):
+    """Some drafts lay a full-page, single-tone "paper" image under the
+    real picture. Taking the first image made every page grey."""
+    background = tmp_path / "_bg.jpg"
+    Image.new("RGB", (900, 1270), (252, 252, 252)).save(background, "JPEG")
+    photo = tmp_path / "_photo.png"
+    img = Image.new("RGB", (120, 90), (200, 120, 60))
+    img.paste((20, 20, 20), (30, 20, 90, 70))
+    img.save(photo)
+    pdf_path = tmp_path / "draft.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=A5)
+    c.drawImage(ImageReader(str(background)), 0, 0, width=A5[0], height=A5[1])
+    c.drawImage(ImageReader(str(photo)), 50, 200, width=240, height=180)
+    c.showPage()
+    c.save()
+
+    result = extract_images(pdf_path, tmp_path / "out")
+
+    assert Image.open(result[0]).size == (120, 90)
+
+
+def test_extract_images_keeps_a_lone_single_tone_image(tmp_path):
+    """With only one image there's nothing better to pick; keep it."""
+    pdf_path = _write_mixed_pdf(tmp_path, [{"image": (252, 252, 252)}])
+
+    result = extract_images(pdf_path, tmp_path / "out")
+
+    assert result[0] is not None

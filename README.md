@@ -24,7 +24,7 @@ Turn a child's picture-book **draft PDF** (scanned handwriting + drawings) into 
 
 What it does today:
 
-- Reads the PDF — extracts the child's text verbatim and the embedded drawings.
+- Reads the PDF — extracts the child's text verbatim and the embedded drawings. A blank full-page "paper" background under the real picture is skipped, and a page number the child typed at the end of a page (e.g. a lone `2` on page 2) is dropped because the book prints its own page numbers; nothing else in the text is touched.
 - Runs an agent conversation (Claude by default; Gemini, GPT (OpenAI), and Ollama all fully supported, including tool use). The agent replies in whatever language you type in. Gemini's free tier (1.5k requests/day at time of writing) lets you try Littlepress without a credit card, and Ollama runs entirely on your machine — no key, no network.
 - While the agent is thinking or a tool is running (AI cover generation, OCR, rendering), the terminal shows a spinner, a pulsing bar and the elapsed time, labelled with what's happening (English or Turkish, following your system locale or `LITTLEPRESS_LANG`). It pauses while you're asked a y/n question and disappears when the work is done.
 - The agent auto-applies high-confidence edits — OCR, typo fixes, layout choices — without pausing at each step. Page text is **only** changed by `propose_typo_fix` (bounded to 3 words / 30 chars; can't funnel a rewrite) or by a verbatim user-supplied correction via `apply_text_correction`; no tool rewrites the child's story on its own.
