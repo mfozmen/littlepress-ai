@@ -75,10 +75,28 @@ def strip_page_number(text: str, page_n: int) -> str:
     """Drop a trailing page number the child typed (``"...oynamış.\n2"``
     on page 2). The renderer prints its own, so it showed twice.
 
-    Only a whitespace-separated final token equal to ``page_n`` goes;
-    every other character of the child's text is left as-is.
+    A whitespace-separated final token equal to ``page_n`` goes, and so
+    does a number alone on the first or last non-empty line when it is
+    between 1 and ``page_n + 1``: a skipped number shifts the child's
+    numbering behind the PDF's. Every other character is left as-is.
     """
-    return re.sub(rf"\s+{page_n}\s*\Z", "", text)
+    text = re.sub(rf"\s+{page_n}\s*\Z", "", text)
+    lines = text.split("\n")
+    filled = [i for i, line in enumerate(lines) if line.strip()]
+    if len(filled) < 2:
+        return text
+
+    def is_page_number(line: str) -> bool:
+        line = line.strip()
+        return line.isdecimal() and 1 <= int(line) <= page_n + 1
+
+    first, last = filled[0], filled[-1]
+    if is_page_number(lines[last]):
+        lines = lines[:last]
+        filled.pop()
+    if len(filled) > 1 and is_page_number(lines[first]):
+        lines = lines[first + 1 :]
+    return "\n".join(lines)
 
 
 def slugify(text: str) -> str:

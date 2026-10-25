@@ -389,6 +389,20 @@ def test_to_book_excludes_hidden_pages(tmp_path):
         # Text that is nothing but the number may be the child's content.
         ("4", 4, "4"),
         ("", 1, ""),
+        # A number alone on the first or last line is a page number even
+        # when it lags the PDF page: the child skipped a number on page 7
+        # of Yavru Kedi 1, so page 8 reads "7" and page 9 reads "8".
+        ("7\nVe bir tane daha kedi gelmiş.", 8, "Ve bir tane daha kedi gelmiş."),
+        ("8\nYazar:Poyraz ÖZMEN ", 9, "Yazar:Poyraz ÖZMEN "),
+        ("  \n 3 \n Onu çok sevmiş.", 4, " Onu çok sevmiş."),
+        ("oynamış.\n6\n", 7, "oynamış."),
+        # One ahead is still a page number; anything beyond is content.
+        ("Bir gün\n5", 4, "Bir gün"),
+        ("12\nkedi", 3, "12\nkedi"),
+        ("Saat\n12", 2, "Saat\n12"),
+        ("0\nkedi", 3, "0\nkedi"),
+        # Never strip a page down to nothing.
+        ("4\n5", 5, "4"),
     ],
 )
 def test_strip_page_number(text, page_n, expected):
