@@ -37,6 +37,17 @@ import os
 # ``tests/test_metadata_i18n.py`` enforces this so a locale-tr
 # user can't silently fall back to English mid-flow.
 _TRANSLATIONS: dict[str, dict[str, str]] = {
+    # --- language (asked first, so both languages are shown) ---------
+    "language.menu": {
+        "en": (
+            "[bold]Dil / Language?[/bold]\n  (1) Türkçe\n  (2) English\n"
+            "(press Enter for English)"
+        ),
+        "tr": (
+            "[bold]Dil / Language?[/bold]\n  (1) Türkçe\n  (2) English\n"
+            "(Enter = Türkçe)"
+        ),
+    },
     # --- title -----------------------------------------------------
     "title.prompt": {
         "en": "[bold]What's the title of the book?[/bold]",

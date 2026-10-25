@@ -66,3 +66,11 @@ def _no_real_pdf_viewer(monkeypatch):
     from src import agent_tools
 
     monkeypatch.setattr(agent_tools, "open_in_default_viewer", lambda _p: None)
+
+
+@pytest.fixture(autouse=True)
+def _restore_language_override(monkeypatch):
+    """The session's language question writes ``LITTLEPRESS_LANG``;
+    pin it per test so the choice can't leak into the next test (and
+    tests don't depend on the developer machine's locale)."""
+    monkeypatch.setenv("LITTLEPRESS_LANG", "en")

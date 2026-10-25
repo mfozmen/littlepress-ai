@@ -74,7 +74,8 @@ def _make(tmp_path, lines):
 # run after a successful load: title / author / series / cover /
 # back-cover. Tests that exercise the load path need these inputs
 # scripted between the load line and the next REPL action.
-_METADATA_ANSWERS = ("T", "A", "n", "c", "a")
+# Language (English) first, then title, author, series, cover, back cover.
+_METADATA_ANSWERS = ("2", "T", "A", "n", "c", "a")
 
 
 def test_dragging_pdf_onto_terminal_loads_draft(tmp_path):

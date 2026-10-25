@@ -38,6 +38,7 @@ Design notes:
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -106,6 +107,25 @@ def _prompt_nonempty(prompt: str, read_line: ReadLine, console: Console) -> str:
         value = read_line().strip()
         if value:
             return value
+
+
+_LANGUAGE_ANSWERS = {
+    "1": "tr", "tr": "tr", "türkçe": "tr", "turkce": "tr", "turkish": "tr",
+    "2": "en", "en": "en", "english": "en", "ingilizce": "en", "i̇ngilizce": "en",
+}
+
+
+def collect_language(read_line: ReadLine, console: Console) -> str:
+    """First question of a session: which language to talk in. Enter
+    keeps the detected default."""
+    default = detect_lang()
+    while True:
+        console.print(t("language.menu", default))
+        answer = read_line().strip().lower()
+        if not answer:
+            return default
+        if answer in _LANGUAGE_ANSWERS:
+            return _LANGUAGE_ANSWERS[answer]
 
 
 def collect_title(
@@ -275,7 +295,10 @@ def collect_metadata(
     the same value down to each prompt — the user shouldn't see
     English and Turkish strings mixed in one session.
     """
-    lang = _resolve_lang(lang)
+    lang = collect_language(read_line, console) if lang is None else _resolve_lang(lang)
+    # Explicit override that detect_lang() honours, so labels shown later
+    # (e.g. the agent's progress indicator) follow the user's choice.
+    os.environ["LITTLEPRESS_LANG"] = lang
     collect_title(draft, read_line, console, lang=lang)
     collect_author(draft, read_line, console, lang=lang)
     collect_series(draft, read_line, console, lang=lang)
