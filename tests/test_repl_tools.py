@@ -174,7 +174,7 @@ def test_confirm_pauses_the_agent_progress_indicator(tmp_path):
         return "y"
 
     repl._read = _read
-    with repl._agent._working("Working…"):
+    with repl._agent.working("Working…"):
         assert repl._confirm("spend money?") is True
 
     assert live_while_reading == [False]

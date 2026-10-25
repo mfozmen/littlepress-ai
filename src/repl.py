@@ -9,7 +9,7 @@ PRs (see ``docs/PLAN.md``). Slash commands are the manual escape hatch
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from pathlib import Path
 from typing import Callable
@@ -58,7 +58,9 @@ from src.providers.validator import (
 )
 from src.colophon import detect_colophon_pages
 from src.ingestion import ingest_image_only_pages
-from src.metadata_prompts import collect_metadata
+from src.metadata_i18n import REVIEW_DONE_ANSWERS, t
+from src.metadata_prompts import MetadataChoices, collect_metadata
+from src.setup_flow import finish_setup, render_and_ask
 from src.session_log import LOGGER
 
 
@@ -123,227 +125,44 @@ def _looks_like_pdf_path(line: str) -> bool:
         return False
 
 
-_GREETING_OPENING = (
-    "The user just gave you a PDF draft. Call read_draft to see "
-    "what's in it, greet them in the same language they will use "
-    "(they haven't spoken yet — default to English but switch once "
-    "you see their reply; keep slash commands like /model /render "
-    "/load literal — they are REPL tokens, do NOT translate them). "
-    "\n\n"
-    "The draft arrives already transcribed — ``littlepress`` ran OCR "
-    "and sentinel classification (``<BLANK>`` / ``<TEXT>`` / "
-    "``<MIXED>``) against every image-only page before your first "
-    "turn. Blank pages are already hidden. Do NOT call "
-    "``transcribe_page`` during the metadata phase; the tool stays "
-    "registered only so the user can request a re-OCR on a "
-    "specific page during the post-render review turn.\n\n"
-    "METADATA IS ALREADY SET BY THE REPL. ``littlepress`` collected "
-    "title, author, series (if any), cover choice, and back-cover "
-    "blurb via plain Python prompts before handing control to you. "
-    "Do NOT ask for any of those — they are either already on the "
-    "draft or flagged for AI-branch handling below. Your role is "
-    "to execute any AI branches the user opted into, call "
-    "``render_book`` once, and then drive the post-render review "
-    "turn.\n\n"
-    "KEEP WORKING. Never end a reply by announcing what you will do "
-    "next — the app waits for the user as soon as you stop calling "
-    "tools, so nothing would happen. Do the work in the same turn with "
-    "tool calls. Stop only to ask the user a concrete question (for "
-    "example, approving a drafted cover prompt or blurb) or after the "
-    "render, with the review prompt.\n\n"
-)
-
 _LANGUAGE_NAMES = {"en": "English", "tr": "Turkish"}
 
-_GREETING_AI_COVER_BRANCH = (
-    "AI COVER BRANCH (the user picked 'generate with AI' at the "
-    "cover prompt). The user already chose an AI cover — do not ask "
-    "again whether to use a page drawing instead. Draft a one-line cover-illustration prompt in "
-    "your own words from the story's themes — do NOT quote or "
-    "paraphrase the child's page text into the image prompt. Show "
-    "the prompt to the user for approval, then call "
-    "``generate_cover_illustration`` — the tool's built-in cost "
-    "confirm shows the provider's price and is the only surviving "
-    "gate; it is about money, not content. If that tool isn't "
-    "available, tell the user to run /image-model openai or "
-    "/image-model google (they'll be asked for that provider's API "
-    "key if one isn't already stored in the OS keychain).\n\n"
-)
-
-_GREETING_AI_BACK_COVER_BRANCH = (
-    "AI BACK-COVER BRANCH (the user picked 'draft with AI' at the "
-    "back-cover prompt). Draft a one-line blurb grounded on the "
-    "story's actual page content — a distillation of what the "
-    "story is about, NOT invented from theme clichés about "
-    "childhood / imagination. Show the draft in chat, wait for "
-    "the user to approve, edit, or overwrite. Only after the user "
-    "has accepted a version, call ``set_metadata`` with "
-    "``field='back_cover_text'`` and the accepted text (verbatim). "
-    "PRESERVE-CHILD-VOICE scope: the back-cover blurb is editor-"
-    "facing metadata (the user acting as editor approves the "
-    "draft), not child-authored text, so the AI-draft branch is "
-    "a legitimate opt-in here — but the draft must still be "
-    "grounded in the story's actual pages.\n\n"
-)
-
-_GREETING_RENDER_AND_REVIEW = (
-    "RENDER IMMEDIATELY after any AI branches complete (or "
-    "immediately if there are none). Call ``render_book``; the "
-    "PDF opens in the user's viewer automatically.\n\n"
-    "POST-RENDER REVIEW TURN. Post exactly one prompt to the user "
-    "after a successful render:\n"
-    "  'PDF ready. Which page numbers have issues? "
-    "(e.g. 3, 5 — or type none / ok / ship / done to finish.)'\n"
-    "Parse the user's reply. If they list page numbers with "
-    "corrections in free-form text, dispatch one or more tool calls:\n"
+# The app itself runs the setup, renders and asks the review question
+# (src/setup_flow.py); the agent only turns free-form corrections into
+# tool calls. Sent once, ahead of the user's first review reply.
+_REVIEW_CONTEXT = (
+    "The app has rendered the book from the draft and asked the user which "
+    "pages have issues. Their reply follows. Call read_draft first if you "
+    "need to see the pages. Turn each correction into tool calls:\n"
     "  - 'page N text: <verbatim>' → apply_text_correction(N, <verbatim>). "
     "The user's string is the source of truth; do NOT paraphrase, "
     "translate, or fix anything in it.\n"
     "  - 'page N restore' (or equivalent) → restore_page(N).\n"
     "  - 'page N hide' → hide_page(N).\n"
-    "  - 'page N show drawing' / 'page N layout image-top' / 'show "
-    "the picture on page N' → choose_layout(N, 'image-top'). "
-    "Only works on pages that still have an image attached — "
-    "deterministic ingestion defaults <MIXED>-classified pages "
-    "(text + separate drawing) to ``text-only`` so the rendered "
-    "book doesn't print the handwritten text twice, and this "
-    "command opts the drawing back in. <TEXT>-classified pages "
-    "(pure text, no drawing) have no image to restore; if the "
-    "user asks for a drawing on such a page, tell them it was "
-    "classified as text-only and suggest generate_page_illustration "
-    "(OpenAI only, cost-gated) instead.\n"
-    "  - Cross-page asks ('regenerate the cover, less purple') → "
-    "call the appropriate tool; user confirms cost if any.\n"
-    "After applying all corrections, call render_book AGAIN and "
-    "ask the same review prompt. Loop until the user replies with "
-    "an intent that means 'nothing to fix / ship it' — accept "
-    "English tokens ``none``, ``ok``, ``ship``, ``done`` "
-    "case-insensitively, AND recognise the equivalent in whatever "
-    "language the user has been typing (they may reply in their "
-    "own language; trust the semantic match, don't force them to "
-    "use English). On exit, close with a single line pointing at "
-    "the stable PDF path.\n\n"
-    "PRESERVE-CHILD-VOICE. Even though tools don't confirm, the "
-    "child's words remain sacred: the OCR prompt still says "
-    "'verbatim, do not fix, do not polish'; apply_text_correction "
-    "writes the user's string as-is with no model in between; "
-    "input files under .book-gen/input/ and the per-page drawings "
-    "under .book-gen/images/page-NN.png are NEVER deleted or "
-    "rewritten by any tool."
+    "  - 'page N show drawing' / 'show the picture on page N' → "
+    "choose_layout(N, 'image-top'). Only pages that still have an image "
+    "attached can show one; for a text-only page suggest "
+    "generate_page_illustration (cost-gated) instead.\n"
+    "  - Cover or other cross-page asks ('a new cover, less purple') → "
+    "the matching tool; the user confirms any cost.\n"
+    "Do NOT render: the app re-renders and asks again after your changes. "
+    "If something is unclear, ask one short question.\n\n"
+    "PRESERVE-CHILD-VOICE. The child's words are sacred: "
+    "apply_text_correction writes the user's string as-is; input files "
+    "under .book-gen/input/ and the drawings under "
+    ".book-gen/images/page-NN.png are never deleted or rewritten.\n\n"
+    "The user says:\n"
 )
 
 
-_AI_COVER_TAG = "ai"
-_AI_BACK_COVER_TAG = "ai-draft"
-
-
-_DETERMINISTIC_COVER_STATE = {
-    "page-drawing": (
-        "COVER STATE: the user picked option (a) at the cover prompt — "
-        "use a page drawing from the story. ``draft.cover_image`` is "
-        "already set to the first available page drawing and "
-        "``draft.cover_style`` is ``full-bleed``. Do NOT call "
-        "``set_cover``; the user's choice is final. If they ask in "
-        "the post-render review turn for a different drawing, that "
-        "is when ``set_cover`` is appropriate.\n\n"
-    ),
-    "poster": (
-        "COVER STATE: the user picked option (c) at the cover prompt — "
-        "poster style (typography only, no image). ``draft.cover_image`` "
-        "is intentionally ``None`` and ``draft.cover_style`` is "
-        "``poster`` — this is the COMPLETE poster configuration, NOT "
-        "a half-set cover waiting for an image. Do NOT call "
-        "``set_cover`` to "
-        "fill in an image; the user's choice is final. If they ask "
-        "in the post-render review turn for a different cover, that "
-        "is when ``set_cover`` is appropriate.\n\n"
-    ),
-}
-
-
-_KNOWN_COVER_CHOICES = frozenset(
-    {_AI_COVER_TAG, *_DETERMINISTIC_COVER_STATE.keys()}
-)
-_KNOWN_BACK_COVER_CHOICES = frozenset(
-    {_AI_BACK_COVER_TAG, "none", "self-written"}
-)
-
-
-def _build_agent_greeting(
-    cover_choice: str | None = None,
-    back_cover_choice: str | None = None,
-    lang: str = "en",
-) -> str:
-    """Build the agent's first-turn greeting from the REPL's metadata
-    choices.
-
-    Deterministic cover branches (``page-drawing`` / ``poster``)
-    inject an explicit COVER STATE block so the agent doesn't
-    misread the draft state and "helpfully" call ``set_cover`` —
-    that's what triggered the cover-override bug reported on the
-    2026-04-26 live render (user picked poster, got a page-drawing
-    cover because the agent saw ``cover_image=None`` and inferred
-    the cover wasn't configured yet).
-
-    The AI branches (``cover == "ai"``, ``back_cover == "ai-draft"``)
-    inject their judgment-instruction block instead — that path
-    legitimately calls ``set_cover`` (via
-    ``generate_cover_illustration``) so the COVER STATE warning
-    doesn't apply.
-
-    Deterministic back-cover branches (``none`` / ``self-written``)
-    don't have an analogous override risk today (``set_metadata``
-    on ``back_cover_text`` is the only path the agent has, and the
-    same "metadata is already set" framing covers it), so no
-    per-branch state block is injected for the back cover.
-
-    Default ``None`` for both args produces a NEUTRAL greeting with
-    no cover-state block and no AI block — the shape used by the
-    backwards-compat ``_AGENT_GREETING_HINT`` constant for tests
-    that don't care about per-branch behaviour. Real sessions
-    always pass explicit values from ``MetadataChoices``.
-
-    Unknown values raise ``ValueError`` rather than falling through
-    silently — the silent-fallthrough was the exact failure mode
-    the deterministic cover-state fix is meant to prevent (a future
-    cover option without a registered ``_DETERMINISTIC_COVER_STATE``
-    entry would otherwise revert to the no-block bug shape).
-    """
-    if cover_choice is not None and cover_choice not in _KNOWN_COVER_CHOICES:
-        raise ValueError(
-            f"Unknown cover_choice {cover_choice!r}. Valid: "
-            f"{sorted(_KNOWN_COVER_CHOICES)} or None for the neutral "
-            f"default. A new cover option must register a "
-            f"_DETERMINISTIC_COVER_STATE entry (or the AI branch tag) "
-            f"before reaching the greeting builder."
-        )
-    if back_cover_choice is not None and back_cover_choice not in _KNOWN_BACK_COVER_CHOICES:
-        raise ValueError(
-            f"Unknown back_cover_choice {back_cover_choice!r}. Valid: "
-            f"{sorted(_KNOWN_BACK_COVER_CHOICES)} or None."
-        )
+def _build_review_context(lang: str) -> str:
     name = _LANGUAGE_NAMES.get(lang, "English")
-    parts = [
-        f"LANGUAGE: the user answered the setup questions in {name}. "
-        f"Write every reply to them in {name}; switch only if they start "
-        "writing in another language.\n\n",
-        _GREETING_OPENING,
-    ]
-    if cover_choice == _AI_COVER_TAG:
-        parts.append(_GREETING_AI_COVER_BRANCH)
-    elif cover_choice in _DETERMINISTIC_COVER_STATE:
-        parts.append(_DETERMINISTIC_COVER_STATE[cover_choice])
-    if back_cover_choice == _AI_BACK_COVER_TAG:
-        parts.append(_GREETING_AI_BACK_COVER_BRANCH)
-    parts.append(_GREETING_RENDER_AND_REVIEW)
-    return "".join(parts)
+    return (
+        f"LANGUAGE: the user set the book up in {name}. Reply in {name}; "
+        "switch only if they start writing in another language. Keep slash "
+        "commands like /render literal.\n\n" + _REVIEW_CONTEXT
+    )
 
-
-# Backward-compat shim: many existing tests import the old string
-# constant directly. The default (no AI branches) is equivalent to
-# the fully-deterministic metadata path and keeps those tests
-# readable as "what does the greeting look like in the common case".
-_AGENT_GREETING_HINT = _build_agent_greeting()
 
 
 def _print_offline_metadata_skip_notice(console: Console) -> None:
@@ -419,6 +238,10 @@ class Repl:
         # provider configured.
         self._image_provider_label: str | None = None
         self._draft: Draft | None = None
+        # Language of the review turn; ``None`` when no review is open.
+        self._review_lang: str | None = None
+        # Agent instructions sent once, ahead of the first review reply.
+        self._review_context: str | None = None
         # ``_build_agent`` calls ``_refresh_image_provider`` itself
         # so the slot reflects the current chat-provider state at
         # construction time (auto-wire for chat=OpenAI users).
@@ -506,16 +329,47 @@ class Repl:
             return
         self._run_ingestion()
         choices = collect_metadata(self._draft, self._read, self._console)
-        greeting = _build_agent_greeting(
+        self._start_book(choices)
+        self._persist_draft()
+
+    def _start_book(self, choices: MetadataChoices) -> None:
+        """Finish the setup in code (AI drafts, render, review question)
+        and open the review turn for the agent."""
+        generate = None
+        if self._image_provider is not None:
+            tool = generate_cover_illustration_tool(
+                get_draft=lambda: self._draft,
+                get_session_root=lambda: self._session_root or Path.cwd(),
+                image_provider=self._image_provider,
+                confirm=self._confirm,
+            )
+
+            def generate(prompt: str) -> str:
+                label = t("progress.generate_cover_illustration", choices.lang)
+                with self._agent.working(label):
+                    return tool.handler({"prompt": prompt})
+
+        rendered = finish_setup(
+            draft=self._draft,
+            llm=self._llm,
+            read_line=self._read,
+            console=self._console,
+            lang=choices.lang,
             cover_choice=choices.cover,
             back_cover_choice=choices.back_cover,
-            lang=choices.lang,
+            generate_cover=generate,
+            render=self._render_book,
         )
-        try:
-            self._agent.say(greeting)
-        except Exception as e:
-            self._console.print(f"[red]Agent error:[/red] {e}")
-        self._persist_draft()
+        self._review_lang = choices.lang if rendered else None
+        self._review_context = _build_review_context(choices.lang)
+
+    def _render_book(self) -> str:
+        tool = render_book_tool(
+            get_draft=lambda: self._draft,
+            get_session_root=lambda: self._session_root or Path.cwd(),
+        )
+        with self._agent.working(t("progress.render_book", self._review_lang or "en")):
+            return tool.handler({})
 
     def _read_loop(self) -> int:
         """Drive the interactive read loop until the user exits.
@@ -647,9 +501,6 @@ class Repl:
             set_cover_tool(get_draft=get_draft),
             choose_layout_tool(get_draft=get_draft),
             propose_layouts_tool(get_draft=get_draft),
-            render_book_tool(
-                get_draft=get_draft, get_session_root=get_session_root
-            ),
             hide_page_tool(get_draft=get_draft),
             apply_text_correction_tool(get_draft=get_draft),
             restore_page_tool(
@@ -1061,10 +912,24 @@ class Repl:
                 f"[dim](no model selected — pick one with /model)[/dim] {line}"
             )
             return None
+        lang = self._review_lang
+        if lang is not None and line.strip().lower().rstrip(".!") in REVIEW_DONE_ANSWERS:
+            self._review_lang = None
+            self._console.print(t("review.done", lang))
+            return None
+        message = line
+        if self._review_context is not None:
+            message = self._review_context + line
+            self._review_context = None
+        before = asdict(self._draft) if self._draft is not None else None
         try:
-            self._agent.say(line)
+            self._agent.say(message)
         except Exception as e:
             self._console.print(f"[red]LLM error:[/red] {e}")
+        # The agent only edits the draft; re-rendering is the app's job.
+        if lang is not None and self._draft is not None and asdict(self._draft) != before:
+            self._persist_draft()
+            render_and_ask(self._console, lang, self._render_book)
         return None
 
     def _dispatch_slash(self, line: str) -> int | None:
@@ -1645,15 +1510,7 @@ def _cmd_load(repl: Repl, args: str) -> None:
     # turn — the agent must see a draft that's already been transcribed.
     repl._run_ingestion()
     choices = collect_metadata(repl._draft, repl._read, repl._console)
-    greeting = _build_agent_greeting(
-        cover_choice=choices.cover,
-        back_cover_choice=choices.back_cover,
-        lang=choices.lang,
-    )
-    try:
-        repl._agent.say(greeting)
-    except Exception as e:
-        repl._console.print(f"[red]Agent error:[/red] {e}")
+    repl._start_book(choices)
     return None
 
 

@@ -388,7 +388,7 @@ def test_indicator_falls_back_to_ascii_on_a_non_utf8_console():
     console = Console(file=stream, force_terminal=True, width=80)
     agent = Agent(llm=None, tools=[], console=console)
 
-    with agent._working("Kapak resmi üretiliyor…"):
+    with agent.working("Kapak resmi üretiliyor…"):
         agent._progress.refresh()
 
     stream.flush()

@@ -1,10 +1,10 @@
-"""End-to-end review-based-gate flow.
+"""End-to-end review flow.
 
-Load a draft → agent auto-ingests (no confirms) → renders → asks
-'which pages have issues?' → user replies with a verbatim page-1 text
-override → agent calls apply_text_correction + re-renders → user says
-'none' → loop exits. The assertion is that the re-rendered PDF
-contains the overridden text.
+Load a draft → setup questions → the app renders and asks 'which pages
+have issues?' → the user replies with a verbatim page-1 text override →
+the agent calls apply_text_correction → the app re-renders and asks
+again → the user says 'none' → the app closes the review without the
+agent. The re-rendered PDF must contain the overridden text.
 """
 
 import io
@@ -84,27 +84,13 @@ def test_review_loop_applies_user_correction_and_re_renders(tmp_path):
     pdf = _write_pdf(tmp_path)
     draft = draft_mod.from_pdf(pdf, tmp_path / ".book-gen" / "images")
 
-    # Scripted agent turns:
-    # 1. After the user's first input ("PDF is loaded"), agent calls
-    #    set_metadata to title the book.
-    # 2. Agent calls render_book.
-    # 3. Agent replies with the review prompt.
-    # 4. User replies with the verbatim correction.
-    # 5. Agent calls apply_text_correction(page=1, text="OVERRIDE").
-    # 6. Agent calls render_book again.
-    # 7. Agent replies with the review prompt again.
-    # 8. User replies "none".
-    # 9. Agent ends with a final line.
+    # Scripted agent turns — only the correction needs the agent:
+    # apply_text_correction(page=1, text="OVERRIDE"), then a short reply.
     responses = [
-        _tool_call("set_metadata", {"field": "title", "value": "Story"}),
-        _tool_call("render_book", {}),
-        _text("PDF ready. Which page numbers have issues? (e.g. 3, 5 — or none.)"),
         _tool_call(
             "apply_text_correction", {"page": 1, "text": "OVERRIDE"}
         ),
-        _tool_call("render_book", {}),
-        _text("PDF ready. Which page numbers have issues? (e.g. 3, 5 — or none.)"),
-        _text("All set — PDF is at .book-gen/output/story.pdf"),
+        _text("Page 1 updated — anything else?"),
     ]
     llm = _ScriptedLLM(responses)
 
@@ -114,7 +100,7 @@ def test_review_loop_applies_user_correction_and_re_renders(tmp_path):
         read_line=_scripted(
             [
                 # Deterministic metadata prompts before the agent turn.
-                "2", "T", "A", "n", "c", "a",
+                "2", "Story", "A", "n", "c", "a",
                 "page 1 text: OVERRIDE",  # review turn 1 — correction
                 "none",                    # review turn 2 — exit
             ]
@@ -130,7 +116,7 @@ def test_review_loop_applies_user_correction_and_re_renders(tmp_path):
 
     # Re-rendered PDF contains the user's verbatim override.
     rendered = tmp_path / ".book-gen" / "output" / "story.pdf"
-    assert rendered.is_file(), "render_book should have produced a stable PDF"
+    assert rendered.is_file(), "the app should have rendered a stable PDF"
     text = _extract_pdf_text(rendered)
     assert "OVERRIDE" in text, f"expected OVERRIDE in rendered PDF, got:\n{text}"
 
@@ -141,3 +127,42 @@ def test_review_loop_applies_user_correction_and_re_renders(tmp_path):
     assert "apply_text_correction" in names_seen
     assert "restore_page" in names_seen
     assert "hide_page" in names_seen
+
+
+def test_review_done_reply_is_handled_without_the_agent(tmp_path):
+    pdf = _write_pdf(tmp_path)
+    draft = draft_mod.from_pdf(pdf, tmp_path / ".book-gen" / "images")
+    llm = _ScriptedLLM([])
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+    repl = Repl(
+        read_line=_scripted(["1", "Hikaye", "A", "h", "c", "a", "Tamam."]),
+        console=console,
+        provider=find("anthropic"),
+        session_root=tmp_path,
+        llm_factory=lambda _spec, _key: llm,
+    )
+    repl.set_draft(draft)
+
+    assert repl.run() == 0
+    assert llm.calls == []
+    assert ".book-gen/output/" in buf.getvalue()
+
+
+def test_after_the_review_ends_chat_goes_straight_to_the_agent(tmp_path):
+    pdf = _write_pdf(tmp_path)
+    draft = draft_mod.from_pdf(pdf, tmp_path / ".book-gen" / "images")
+    llm = _ScriptedLLM([_text("Sure?")])
+    repl = Repl(
+        read_line=_scripted(["2", "T", "A", "n", "c", "a", "done", "done"]),
+        console=Console(file=io.StringIO(), force_terminal=False),
+        provider=find("anthropic"),
+        session_root=tmp_path,
+        llm_factory=lambda _spec, _key: llm,
+    )
+    repl.set_draft(draft)
+
+    repl.run()
+
+    # The second "done" is ordinary chat once the review is closed.
+    assert len(llm.calls) == 1
