@@ -138,7 +138,7 @@ def test_memory_persists_after_agent_tool_call(tmp_path):
         # The agent's subsequent set_metadata tool call then overrides
         # ``title`` to "Agent Picked", which is what the assertion pins.
         tmp_path,
-        ["T", "A", "n", "c", "a"],
+        ["2", "T", "A", "n", "c", "a"],
         llm=llm,
         provider=find("anthropic"),
         draft=draft,

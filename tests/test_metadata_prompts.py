@@ -642,7 +642,7 @@ def test_collect_metadata_runs_all_five_prompts_in_order(tmp_path):
             "a",               # cover: page-drawing
             "a",               # back-cover: none
         ]),
-        _console(),
+        _console(),        lang="en",
     )
 
     assert isinstance(choices, MetadataChoices)
@@ -676,6 +676,7 @@ def test_collect_metadata_returns_ai_flags_when_ai_branches_chosen(tmp_path):
             "c",                # back-cover: ai-draft
         ]),
         _console(),
+        lang="en",
     )
 
     assert choices.cover == "ai"
@@ -723,6 +724,7 @@ def test_collect_metadata_strips_duplicate_title_header_from_first_page(tmp_path
             "a",                # back-cover: none
         ]),
         _console(),
+        lang="en",
     )
 
     # Sanity: title got the volume suffix.
@@ -731,3 +733,55 @@ def test_collect_metadata_strips_duplicate_title_header_from_first_page(tmp_path
     assert draft.pages[0].text == "Bir gün bir yumurta çatlamış..."
     # Second page is untouched.
     assert draft.pages[1].text == "Story continues."
+
+
+# ---------------------------------------------------------------------------
+# collect_language — the first question of a session
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "answer, expected",
+    [("1", "tr"), ("türkçe", "tr"), ("2", "en"), ("English", "en"), ("", "en")],
+)
+def test_collect_language_maps_answers(answer, expected):
+    from src.metadata_prompts import collect_language
+
+    assert collect_language(_scripted([answer]), _console()) == expected
+
+
+def test_collect_language_defaults_to_the_detected_language(monkeypatch):
+    from src.metadata_prompts import collect_language
+
+    monkeypatch.setenv("LITTLEPRESS_LANG", "tr")
+
+    assert collect_language(_scripted([""]), _console()) == "tr"
+
+
+def test_collect_language_reasks_on_an_unknown_answer():
+    from src.metadata_prompts import collect_language
+
+    assert collect_language(_scripted(["fr", "1"]), _console()) == "tr"
+
+
+def test_collect_metadata_asks_the_language_first(tmp_path, monkeypatch):
+    """The setup flow opens with a language choice; every later prompt,
+    the agent's replies and other localised labels follow it."""
+    import os
+
+    from src.metadata_prompts import collect_metadata
+
+    draft = _draft_with_pages(tmp_path, [("page-01.png", False)])
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+
+    choices = collect_metadata(
+        draft,
+        _scripted(["1", "Yavru Kedi", "Poyraz", "h", "c", "a"]),
+        console,
+    )
+
+    out = buf.getvalue()
+    assert out.index("English") < out.index("Kitabın adı ne?")
+    assert choices.lang == "tr"
+    assert os.environ["LITTLEPRESS_LANG"] == "tr"

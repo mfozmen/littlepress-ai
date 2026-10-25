@@ -29,7 +29,8 @@ def _scripted(lines):
 # that run after a pre-loaded draft (title / author / series / cover /
 # back-cover). Tests exercising the run()-with-set_draft path need
 # these scripted before any post-greeting user inputs.
-_METADATA_ANSWERS = ("T", "A", "n", "c", "a")
+# Language (English) first, then title, author, series, cover, back cover.
+_METADATA_ANSWERS = ("2", "T", "A", "n", "c", "a")
 
 
 def _write_pdf(tmp_path):
@@ -245,7 +246,7 @@ def test_agent_render_tool_produces_pdf_and_booklet(tmp_path):
         # "My Book" as title + page-drawing cover (option "a") so the
         # rendered filename ends up ``my_book.pdf`` and the cover
         # renderer has the page drawing to lay out.
-        read_line=_scripted(["My Book", "A", "n", "a", "a"]),
+        read_line=_scripted(["2", "My Book", "A", "n", "a", "a"]),
         console=console,
         provider=find("anthropic"),
         session_root=tmp_path,

@@ -114,7 +114,7 @@ def test_review_loop_applies_user_correction_and_re_renders(tmp_path):
         read_line=_scripted(
             [
                 # Deterministic metadata prompts before the agent turn.
-                "T", "A", "n", "c", "a",
+                "2", "T", "A", "n", "c", "a",
                 "page 1 text: OVERRIDE",  # review turn 1 — correction
                 "none",                    # review turn 2 — exit
             ]

@@ -182,7 +182,7 @@ def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
         # before handing to the agent. Script the minimum accepted
         # answers so the flow reaches the agent greeting.
         read_line=_scripted(
-            [f"/load {pdf}", "T", "A", "n", "c", "a", "/exit"]
+            [f"/load {pdf}", "2", "T", "A", "n", "c", "a", "/exit"]
         ),
         console=console,
         provider=find("anthropic"),
@@ -241,7 +241,7 @@ def test_load_prints_deterministic_metadata_prompts_before_agent_turn(
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
         read_line=_scripted(
-            [f"/load {pdf}", "The Brave Owl", "Ece", "n", "c", "a", "/exit"]
+            [f"/load {pdf}", "2", "The Brave Owl", "Ece", "n", "c", "a", "/exit"]
         ),
         console=console,
         provider=find("anthropic"),
@@ -443,7 +443,7 @@ def test_load_pdf_auto_ingests_image_only_pages(tmp_path):
         # After ``/load`` the REPL runs deterministic metadata prompts
         # before the agent turn — script minimum answers.
         read_line=_scripted(
-            [f"/load {pdf}", "T", "A", "n", "c", "a", "/exit"]
+            [f"/load {pdf}", "2", "T", "A", "n", "c", "a", "/exit"]
         ),
         console=console,
         provider=find("anthropic"),

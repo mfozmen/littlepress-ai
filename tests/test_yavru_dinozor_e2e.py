@@ -220,6 +220,7 @@ def test_yavru_dinozor_renders_illustrations_and_no_duplicate_text(
     repl = Repl(
         read_line=_scripted([
             f"/load {_FIXTURE}",
+            "1",            # language: Turkish
             "Yavru Dinozor",
             "Poyraz Özmen",
             "e",            # series? yes
