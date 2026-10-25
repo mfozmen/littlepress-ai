@@ -1,7 +1,28 @@
 # CHANGELOG
 
 
+## v1.27.0 (2026-10-25)
+
+### Features
+
+- **cli**: Add a littlepress update command
+  ([#103](https://github.com/mfozmen/littlepress-ai/pull/103),
+  [`e46af58`](https://github.com/mfozmen/littlepress-ai/commit/e46af5859ed5089dcefc37d1385d52f0d3051ac2))
+
+`littlepress update` (or `littlepress-ai update`) fast-forwards a clean main checkout and installs
+  any new dependencies. The package itself is not reinstalled because Windows keeps the running
+  littlepress.exe locked, and a failed reinstall leaves the package half removed. --version now
+  reads the checkout's pyproject, since the installed metadata goes stale.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.26.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.26.0 [skip ci]
+  ([`0b4fbbf`](https://github.com/mfozmen/littlepress-ai/commit/0b4fbbf2351b72cfe360b0b272ef049d4f48fe5c))
 
 ### Features
 
