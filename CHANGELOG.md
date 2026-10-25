@@ -1,7 +1,27 @@
 # CHANGELOG
 
 
+## v1.28.1 (2026-10-25)
+
+### Bug Fixes
+
+- Drop page numbers that lag behind the PDF page
+  ([#106](https://github.com/mfozmen/littlepress-ai/pull/106),
+  [`e714d45`](https://github.com/mfozmen/littlepress-ai/commit/e714d45f132221cfeef7e86ce18aa0b0f3a82162))
+
+Yavru Kedi 1 skips the number on page 7, so pages 8 and 9 start with "7" and "8" and those leaked
+  into the book. A number alone on the first or last line, between 1 and page_n + 1, is now treated
+  as a page number. A page is never stripped down to nothing.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.28.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.28.0 [skip ci]
+  ([`8f8a646`](https://github.com/mfozmen/littlepress-ai/commit/8f8a64606c13c57c69e6747591a27464e31836de))
 
 ### Features
 
