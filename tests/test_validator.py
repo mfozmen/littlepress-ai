@@ -456,6 +456,10 @@ def test_openai_ping_sends_timeout_and_spec_model(monkeypatch):
     assert 0 < fake.OpenAI.last_timeout <= 30
     sent = fake.OpenAI.last_client.chat.completions.last_kwargs
     assert sent["model"] == spec.validation_model
+    # GPT-5-family models reject ``max_tokens`` (400) and need room
+    # beyond 1 token to finish, so the ping must not be misread.
+    assert "max_tokens" not in sent
+    assert sent["max_completion_tokens"] >= 16
 
 
 def _make_fake_anthropic(*, raise_error):

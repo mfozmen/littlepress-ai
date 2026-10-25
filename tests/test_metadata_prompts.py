@@ -680,6 +680,7 @@ def test_collect_metadata_returns_ai_flags_when_ai_branches_chosen(tmp_path):
 
     assert choices.cover == "ai"
     assert choices.back_cover == "ai-draft"
+    assert choices.lang in ("en", "tr")
     # Series+volume was applied.
     assert draft.title == "Yavru Dinozor - 1"
     # AI branches left cover and back-cover untouched.

@@ -72,7 +72,7 @@ SPECS: tuple[ProviderSpec, ...] = (
         "openai",
         "GPT (OpenAI)",
         requires_api_key=True,
-        validation_model="gpt-4o-mini",
+        validation_model="gpt-5.4-mini",
         key_url="https://platform.openai.com/api-keys",
         key_steps=(
             "Sign in to OpenAI Platform.",
@@ -532,10 +532,10 @@ def _gemini_response_to_blocks(response) -> tuple[list[dict], str]:
     return blocks, ("tool_use" if any_tool_use else "end_turn")
 
 
-# OpenAI defaults. gpt-4o-mini is the cheapest tool-use-capable model
-# at time of writing; the validation ping uses the same id unless the
-# spec overrides it.
-_OPENAI_CHAT_MODEL = "gpt-4o-mini"
+# OpenAI defaults: a cheap, current tool-use model (gpt-4o-mini ignored
+# greeting instructions in live sessions). The validation ping uses the
+# same id unless the spec overrides it.
+_OPENAI_CHAT_MODEL = "gpt-5.4-mini"
 _OPENAI_CHAT_TIMEOUT_SECONDS = 60.0
 
 

@@ -63,6 +63,8 @@ class MetadataChoices:
 
     cover: str
     back_cover: str
+    #: Language the questions were asked in; the agent replies in it.
+    lang: str = "en"
 
 
 # Per-language y/n token sets. English-only mode keeps the strict
@@ -286,4 +288,4 @@ def collect_metadata(
     # the duplicate header line if the first non-hidden page starts
     # with one. Idempotent — re-running ``/metadata`` is safe.
     strip_title_header_from_first_page(draft)
-    return MetadataChoices(cover=cover, back_cover=back_cover)
+    return MetadataChoices(cover=cover, back_cover=back_cover, lang=lang)

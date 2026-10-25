@@ -967,6 +967,9 @@ def test_generate_cover_illustration_surfaces_provider_error(tmp_path):
     # Cover state didn't get half-written.
     assert draft.cover_image is None
     assert "bad key" in result.lower() or "failed" in result.lower()
+    # A live session rendered and said "PDF ready" without ever telling
+    # the user the paid cover call had failed.
+    assert "tell the user" in result.lower()
 
 
 def test_generate_cover_illustration_requires_non_empty_prompt(tmp_path):
