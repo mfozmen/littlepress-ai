@@ -1,7 +1,48 @@
 # CHANGELOG
 
 
+## v1.24.0 (2026-10-25)
+
+### Features
+
+- **agent**: Show a live progress indicator while the agent works
+  ([#97](https://github.com/mfozmen/littlepress-ai/pull/97),
+  [`a0429ef`](https://github.com/mfozmen/littlepress-ai/commit/a0429ef557c5e492aefe8d000460c00391aeaf87))
+
+A slow LLM turn or a 30-90 s cover generation left the terminal silent, so users thought the app had
+  hung. The agent now shows a spinner, a pulsing (indeterminate) bar and the elapsed time while the
+  LLM thinks or a tool runs, labelled per long-running tool and localised via metadata_i18n. The
+  cost confirm pauses it so y/n input stays clean, and the spinner falls back to ASCII on non-UTF-8
+  streams.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- Hoist GoogleImageProvider out of pytest.raises blocks (S5778)
+  ([#95](https://github.com/mfozmen/littlepress-ai/pull/95),
+  [`64f9b80`](https://github.com/mfozmen/littlepress-ai/commit/64f9b80464fba5ca3033c528113017f3a82f78c3))
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+- Split composite asserts and drop pytest alias (S9073, S9084)
+  ([#96](https://github.com/mfozmen/littlepress-ai/pull/96),
+  [`bb4c744`](https://github.com/mfozmen/littlepress-ai/commit/bb4c744492445af0f77f9fe59ed513bd2c873824))
+
+SonarCloud added these rules while the scan was offline; the first scan after the SONAR_TOKEN
+  refresh flagged 35 composite `assert a and b` statements and two `import pytest as _pytest`
+  aliases in existing tests. Each composite assert is now one assert per condition, so a failure
+  names the condition that broke.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.23.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.23.0 [skip ci]
+  ([`0cf9ae7`](https://github.com/mfozmen/littlepress-ai/commit/0cf9ae7b892d23877ce779f1f85bfc9c6e2ec662))
 
 ### Continuous Integration
 
