@@ -1,7 +1,34 @@
 # CHANGELOG
 
 
+## v1.25.1 (2026-10-25)
+
+### Bug Fixes
+
+- Pick the real picture, drop typed page numbers, restore the right drawing
+  ([#99](https://github.com/mfozmen/littlepress-ai/pull/99),
+  [`7692741`](https://github.com/mfozmen/littlepress-ai/commit/769274102bd42387a4978612d79b113ef3a2291d))
+
+Found in a live session with a draft whose pages each lay a flat grey "paper" JPEG under a small
+  photo:
+
+- extract_images took the first image, so every page got the same grey background. Pages with
+  several images now skip single-tone ones; a lone image is still kept. - The child typed each
+  page's number at the end of the text and the renderer prints its own, so numbers showed twice. A
+  trailing token equal to the page's own number is dropped at ingest and from OCR replies
+  (maintainer-approved; nothing else in the text changes). - restore_page preferred page-NN.png,
+  which re-attached an older book's drawing left in the same .book-gen/. It now takes the newest
+  file, since each ingest writes a single extension.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.25.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.25.0 [skip ci]
+  ([`65303f3`](https://github.com/mfozmen/littlepress-ai/commit/65303f3ee1038dcccced3b2632f6096bc6980788))
 
 ### Features
 
