@@ -144,7 +144,8 @@ def test_excess_snapshots_keeps_top_n_by_version(tmp_path):
     assert excess_snapshots(out, "story", keep=5) == []
 
     # Sanity: v3 stays regardless.
-    assert v3.exists() and v3b.exists()
+    assert v3.exists()
+    assert v3b.exists()
 
 
 def test_excess_snapshots_missing_dir_returns_empty(tmp_path):

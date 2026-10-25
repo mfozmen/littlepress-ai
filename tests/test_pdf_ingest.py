@@ -102,9 +102,11 @@ def test_extract_images_preserves_page_order_in_mixed_pdf(tmp_path):
     result = extract_images(pdf_path, out_dir)
 
     assert len(result) == 3
-    assert result[0] is not None and result[0].exists()
+    assert result[0] is not None
+    assert result[0].exists()
     assert result[1] is None
-    assert result[2] is not None and result[2].exists()
+    assert result[2] is not None
+    assert result[2].exists()
 
 
 def test_extract_images_creates_out_dir_if_missing(tmp_path):

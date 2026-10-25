@@ -76,7 +76,8 @@ def test_pages_lists_each_page_with_image_marker_and_preview(tmp_path):
 
     out = buf.getvalue()
     # Both page numbers appear (1-indexed).
-    assert "1" in out and "2" in out
+    assert "1" in out
+    assert "2" in out
     # Text previews show the child's words verbatim (no rewriting).
     assert "once upon a time" in out
     assert "the owl flew home" in out

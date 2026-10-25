@@ -10,6 +10,7 @@ multiples of 4 on its own. These tests pin the new contract:
 
 from pathlib import Path
 
+import pytest
 from pypdf import PdfReader
 
 from src.builder import build_pdf
@@ -256,8 +257,6 @@ def test_draw_cover_raises_on_unknown_style(tmp_path):
     been validated upstream (``load_book`` or ``to_book``). If a Book
     is constructed directly with a bogus style, the dispatcher must
     surface it rather than silently falling back to full-bleed."""
-    import pytest as _pytest
-
     img = _cover_image(tmp_path)
     book = Book(
         title="T",
@@ -267,7 +266,7 @@ def test_draw_cover_raises_on_unknown_style(tmp_path):
         source_dir=tmp_path,
     )
 
-    with _pytest.raises(ValueError, match="bogus-style"):
+    with pytest.raises(ValueError, match="bogus-style"):
         build_pdf(book, tmp_path / "out.pdf")
 
 
@@ -319,9 +318,7 @@ def test_to_book_rejects_invalid_cover_style(tmp_path):
         cover_style="fullbleed",  # typo: missing hyphen
     )
 
-    import pytest as _pytest
-
-    with _pytest.raises(ValueError, match="fullbleed"):
+    with pytest.raises(ValueError, match="fullbleed"):
         to_book(draft, tmp_path)
 
 

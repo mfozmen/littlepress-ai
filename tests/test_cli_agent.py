@@ -256,8 +256,10 @@ def test_agent_render_tool_produces_pdf_and_booklet(tmp_path):
     assert repl.run() == 0
     a5 = tmp_path / ".book-gen" / "output" / "my_book.pdf"
     booklet = tmp_path / ".book-gen" / "output" / "my_book_A4_booklet.pdf"
-    assert a5.is_file() and a5.stat().st_size > 0
-    assert booklet.is_file() and booklet.stat().st_size > 0
+    assert a5.is_file()
+    assert a5.stat().st_size > 0
+    assert booklet.is_file()
+    assert booklet.stat().st_size > 0
     assert "your book is ready" in buf.getvalue().lower()
 
 

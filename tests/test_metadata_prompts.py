@@ -462,7 +462,8 @@ def test_collect_title_prompts_in_turkish_when_lang_is_tr(tmp_path):
     out = buf.getvalue()
     # Substring rather than full match — Rich may add formatting
     # markers around the bolded text.
-    assert "Kitabın" in out and "adı" in out
+    assert "Kitabın" in out
+    assert "adı" in out
 
 
 def test_resolve_lang_normalises_unsupported_to_detected_default(monkeypatch):

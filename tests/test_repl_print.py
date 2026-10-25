@@ -77,7 +77,8 @@ def test_print_command_lists_the_three_critical_settings():
 
     out_lower = out.lower()
     assert "double-sided" in out_lower or "duplex" in out_lower
-    assert "short" in out_lower and "edge" in out_lower
+    assert "short" in out_lower
+    assert "edge" in out_lower
     # The "no booklet mode" warning is the most-skipped one — the
     # PDF is already imposed; Adobe's booklet feature would impose
     # it AGAIN, scrambling the page order. Anchor on the

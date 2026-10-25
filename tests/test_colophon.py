@@ -378,8 +378,10 @@ def test_detect_colophon_pages_prompt_lists_pages_with_numbers(tmp_path):
     msg = llm.calls[0]["messages"][0]["content"]
     # Each page is enumerated with its number (some shape — looking
     # for "1" near the first text and "2" near the second).
-    assert "1" in msg and "Bir gün" in msg
-    assert "2" in msg and "Poyraz" in msg
+    assert "1" in msg
+    assert "Bir gün" in msg
+    assert "2" in msg
+    assert "Poyraz" in msg
     # Sentinel format documented in the prompt.
     assert "<COLOPHON>" in msg
     assert "<NONE>" in msg

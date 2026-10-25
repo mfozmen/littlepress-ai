@@ -599,7 +599,8 @@ def test_image_model_status_reports_the_explicit_provider(tmp_path):
     repl.run()
 
     out = buf.getvalue()
-    assert "openai" in out and "explicit" in out.lower()
+    assert "openai" in out
+    assert "explicit" in out.lower()
 
 
 def test_image_model_status_reports_the_auto_wired_provider(tmp_path):

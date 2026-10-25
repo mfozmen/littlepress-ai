@@ -78,7 +78,8 @@ def test_poster_cover_branch_tells_agent_not_to_call_set_cover():
     # configuration, not a half-set cover.
     assert "complete poster" in g or "intentionally" in g
     # Explicit forbid on set_cover during metadata phase.
-    assert "do not call" in g and "set_cover" in g
+    assert "do not call" in g
+    assert "set_cover" in g
 
 
 def test_page_drawing_cover_branch_tells_agent_not_to_call_set_cover():
@@ -89,7 +90,8 @@ def test_page_drawing_cover_branch_tells_agent_not_to_call_set_cover():
     pins the choice."""
     g = _build_agent_greeting(cover_choice="page-drawing").lower()
     assert "page drawing" in g or "first available page drawing" in g
-    assert "do not call" in g and "set_cover" in g
+    assert "do not call" in g
+    assert "set_cover" in g
 
 
 def test_ai_cover_branch_does_not_inject_deterministic_cover_state():
@@ -228,9 +230,8 @@ def test_ai_back_cover_branch_grounds_draft_in_page_content():
     preserve-child-voice guardrail for the back-cover AI branch."""
     g = _build_agent_greeting(back_cover_choice="ai-draft").lower()
     # Signal the agent must ground its draft in the story's actual text.
-    assert "page" in g and (
-        "story" in g or "actual page content" in g
-    )
+    assert "page" in g
+    assert "story" in g or "actual page content" in g
     # The explicit anti-cliché guard.
     assert "cliché" in g or "cliche" in g or "clichés" in g or "cliches" in g
 
@@ -293,7 +294,8 @@ def test_greeting_drives_auto_ingest_then_review_turn():
     # pins the "already processed" signal separately.
     assert ("auto" in g) or ("without asking" in g) or ("do not ask" in g)
     # Review turn.
-    assert "render" in g and ("issues" in g or "review" in g)
+    assert "render" in g
+    assert "issues" in g or "review" in g
     # Page-number-first ask.
     assert "page number" in g or "which pages" in g or "page numbers" in g
     # Exit tokens — at least 4 English tokens present (Turkish tokens
