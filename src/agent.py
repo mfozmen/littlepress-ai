@@ -91,7 +91,7 @@ class Agent:
     def _drive(self) -> None:
         used_tools = nudged = False
         while True:
-            with self._working(t("progress.thinking", detect_lang())):
+            with self.working(t("progress.thinking", detect_lang())):
                 response = self._llm.turn(self._messages, self._tool_list)
             self._messages.append({"role": "assistant", "content": response.content})
             text = ""
@@ -118,7 +118,7 @@ class Agent:
                 label = t(f"progress.{block['name']}", lang) or t(
                     "progress.working", lang
                 )
-                with self._working(label):
+                with self.working(label):
                     content = self._run_tool(block["name"], block.get("input", {}))
                 tool_results.append(
                     {
@@ -130,7 +130,7 @@ class Agent:
             self._messages.append({"role": "user", "content": tool_results})
 
     @contextmanager
-    def _working(self, label: str) -> Iterator[None]:
+    def working(self, label: str) -> Iterator[None]:
         """Show a spinner, a pulsing bar and the elapsed time until the
         block exits. There is no real percentage to show, so the bar is
         indeterminate; it is erased when the work finishes."""

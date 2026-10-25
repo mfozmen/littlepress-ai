@@ -96,73 +96,11 @@ class _ScriptedLLM:
             "büyüyüp devasa bir etçile dönüşür — ama yalnız değildir, "
             "yanında onu destekleyen bir dostu vardır.",
         ]
-        self._turn_responses = self._build_turn_responses()
+        # The app drives setup and rendering itself; the agent only
+        # answers review replies, and this scenario has none.
+        self._turn_responses: list[AgentResponse] = []
         self.chat_calls: list[dict] = []
         self.turn_calls: list[dict] = []
-
-    @staticmethod
-    def _build_turn_responses() -> list[AgentResponse]:
-        """The agent's job in this scenario is narrow: confirm the
-        AI back-cover blurb (``set_metadata``) and call
-        ``render_book``. No layout meddling — that's what the v3
-        regression was about. The propose_layouts / choose_layout
-        protections enforce this server-side too, but pinning the
-        agent to the minimal flow makes the test deterministic."""
-        return [
-            # Set the back-cover blurb verbatim from the AI draft.
-            AgentResponse(
-                content=[
-                    {
-                        "type": "tool_use",
-                        "id": "t1",
-                        "name": "set_metadata",
-                        "input": {
-                            "field": "back_cover_text",
-                            "value": (
-                                "Bir yumurtadan çatlayıp çıkan yavru "
-                                "dinozor, ormanda büyüyüp devasa bir "
-                                "etçile dönüşür — ama yalnız değildir, "
-                                "yanında onu destekleyen bir dostu "
-                                "vardır."
-                            ),
-                        },
-                    }
-                ],
-                stop_reason="tool_use",
-            ),
-            # Render the book.
-            AgentResponse(
-                content=[
-                    {
-                        "type": "tool_use",
-                        "id": "t2",
-                        "name": "render_book",
-                        "input": {"impose": True},
-                    }
-                ],
-                stop_reason="tool_use",
-            ),
-            # Final review prompt to user.
-            AgentResponse(
-                content=[
-                    {
-                        "type": "text",
-                        "text": (
-                            "PDF hazır. Sayfalarda sorun varsa "
-                            "numarasını yazın, yoksa ok yazın."
-                        ),
-                    }
-                ],
-                stop_reason="end_turn",
-            ),
-            # User says "ok" — final close.
-            AgentResponse(
-                content=[
-                    {"type": "text", "text": "Tamam, kitap hazır!"}
-                ],
-                stop_reason="end_turn",
-            ),
-        ]
 
     def chat(self, messages, **kwargs):
         self.chat_calls.append({"messages": list(messages), "kwargs": dict(kwargs)})
@@ -228,6 +166,7 @@ def test_yavru_dinozor_renders_illustrations_and_no_duplicate_text(
             "1",            # volume
             "c",            # cover: poster
             "c",            # back-cover: AI draft
+            "",             # accept the drafted blurb
             "ok",           # review-turn exit
             "/exit",
         ]),
@@ -239,6 +178,7 @@ def test_yavru_dinozor_renders_illustrations_and_no_duplicate_text(
     repl.run()
 
     assert repl.draft is not None
+    assert llm.turn_calls == [], "the agent should not run before a review reply"
     pages = repl.draft.pages
     assert len(pages) == 8
 

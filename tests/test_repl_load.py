@@ -147,12 +147,11 @@ def test_loading_twice_replaces_previous_draft(tmp_path):
     assert repl.draft.source_pdf.read_bytes() == pdf_b.read_bytes()
 
 
-def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
-    """Dragging a PDF (or typing /load) mid-session must trigger the
-    same agent greeting the CLI uses when it's launched with a PDF
-    arg. Otherwise the user sees "Loaded N pages" and... silence.
-    The agent needs a nudge to call read_draft and start asking
-    questions."""
+def test_load_runs_setup_and_hands_the_review_reply_to_the_agent(tmp_path):
+    """Dragging a PDF (or typing /load) mid-session runs the same setup
+    as the CLI: questions, render and the review prompt, all in code.
+    The agent first hears from the user's review reply, with the review
+    instructions in front of it."""
     import io
 
     from rich.console import Console
@@ -169,7 +168,7 @@ def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
         def turn(self, messages, _tools):
             self.calls.append(list(messages))
             return AgentResponse(
-                content=[{"type": "text", "text": "Hi! I see 1 page."}],
+                content=[{"type": "text", "text": "Which page?"}],
                 stop_reason="end_turn",
             )
 
@@ -177,12 +176,8 @@ def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        # After ``/load`` the REPL runs the deterministic metadata
-        # prompts (title → author → series → cover → back-cover)
-        # before handing to the agent. Script the minimum accepted
-        # answers so the flow reaches the agent greeting.
         read_line=_scripted(
-            [f"/load {pdf}", "2", "T", "A", "n", "c", "a", "/exit"]
+            [f"/load {pdf}", "2", "T", "A", "n", "c", "a", "hide a page", "/exit"]
         ),
         console=console,
         provider=find("anthropic"),
@@ -192,14 +187,13 @@ def test_load_kicks_the_agent_off_when_a_real_provider_is_active(tmp_path):
     repl.run()
 
     assert repl.draft is not None
-    # The agent was invoked after the load (once, with the greeting).
+    assert "Which pages have issues?" in buf.getvalue()
     assert len(llm.calls) == 1
-    # The greeting the agent sees mentions reading the draft.
     first_user_message = llm.calls[0][0]
     assert first_user_message["role"] == "user"
-    assert "read_draft" in first_user_message["content"].lower()
+    assert first_user_message["content"].endswith("The user says:\nhide a page")
     # And the agent's reply surfaced to the user.
-    assert "I see 1 page" in buf.getvalue()
+    assert "Which page?" in buf.getvalue()
 
 
 def test_load_prints_deterministic_metadata_prompts_before_agent_turn(
@@ -479,20 +473,20 @@ def test_load_pdf_auto_ingests_image_only_pages(tmp_path):
         )
 
 
-def test_load_survives_an_agent_that_fails_on_the_greeting(tmp_path, monkeypatch):
-    """The draft is already loaded by the time the agent's opening
-    turn runs. A provider failure there must surface as a message,
-    not lose the pages the user just ingested."""
+def test_load_survives_an_agent_that_fails_in_the_review_turn(tmp_path, monkeypatch):
+    """The draft is already loaded by the time the agent first runs. A
+    provider failure there must surface as a message, not lose the
+    pages the user just ingested."""
     from src import repl as repl_mod
     from src.metadata_prompts import MetadataChoices
     from src.providers.llm import find as find_provider
 
     pdf = _write_pdf(tmp_path, [{"text": "once upon a time"}])
-    monkeypatch.setattr(
-        repl_mod,
-        "collect_metadata",
-        lambda *_a, **_kw: MetadataChoices(cover=None, back_cover=None),
-    )
+    def fake_metadata(draft, *_a, **_kw):
+        draft.title = "T"
+        return MetadataChoices(cover="poster", back_cover="none")
+
+    monkeypatch.setattr(repl_mod, "collect_metadata", fake_metadata)
 
     class _StubLLM:
         """No ``turn`` — Agent.say blows up on the first tool loop."""
@@ -503,7 +497,7 @@ def test_load_survives_an_agent_that_fails_on_the_greeting(tmp_path, monkeypatch
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        read_line=_scripted([f"/load {pdf}", "/exit"]),
+        read_line=_scripted([f"/load {pdf}", "hide page 1", "/exit"]),
         console=console,
         provider=find_provider("anthropic"),
         session_root=tmp_path,
@@ -514,6 +508,6 @@ def test_load_survives_an_agent_that_fails_on_the_greeting(tmp_path, monkeypatch
 
     repl.run()
 
-    assert "Agent error:" in buf.getvalue()
+    assert "LLM error:" in buf.getvalue()
     assert repl.draft is not None
     assert len(repl.draft.pages) == 1

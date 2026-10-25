@@ -141,11 +141,90 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "kapağa düşülüyor.[/yellow]"
         ),
     },
+    # --- AI drafts after the menus (src/setup_flow.py) -------------
+    "cover.ai_review": {
+        "en": (
+            "[bold]Here's a description for the cover picture:[/bold]\n"
+            "  {text}\n"
+            "Press Enter to use it, type your own description, or n to "
+            "skip (poster cover)."
+        ),
+        "tr": (
+            "[bold]Kapak resmi için şu tarifi hazırladım:[/bold]\n"
+            "  {text}\n"
+            "Kullanmak için Enter'a bas, kendi tarifini yaz ya da "
+            "vazgeçmek için h yaz (afiş kapak)."
+        ),
+    },
+    "cover.ai_unavailable": {
+        "en": (
+            "[yellow]No image provider is set up for an AI cover, so the "
+            "book gets a poster cover for now. Add one with /image-model "
+            "openai or /image-model google, then ask for a new cover "
+            "during the review.[/yellow]"
+        ),
+        "tr": (
+            "[yellow]Yapay zekâ kapağı için bir görsel sağlayıcı yok, bu "
+            "yüzden şimdilik afiş kapak kullanılıyor. /image-model openai "
+            "ya da /image-model google ile ekleyip incelemede yeni kapak "
+            "isteyebilirsin.[/yellow]"
+        ),
+    },
+    "cover.ai_failed": {
+        "en": (
+            "[yellow]The cover picture couldn't be made ({error}). Using a "
+            "poster cover; you can ask for a new one during the review."
+            "[/yellow]"
+        ),
+        "tr": (
+            "[yellow]Kapak resmi üretilemedi ({error}). Afiş kapak "
+            "kullanılıyor; incelemede yeniden isteyebilirsin.[/yellow]"
+        ),
+    },
+    "cover.ai_declined": {
+        "en": "[yellow]No cover picture generated; using a poster cover.[/yellow]",
+        "tr": "[yellow]Kapak resmi üretilmedi; afiş kapak kullanılıyor.[/yellow]",
+    },
+    "back_cover.ai_review": {
+        "en": (
+            "[bold]Here's a back-cover blurb:[/bold]\n"
+            "  {text}\n"
+            "Press Enter to use it, type your own, or n to leave it empty."
+        ),
+        "tr": (
+            "[bold]Arka kapak için şu yazıyı hazırladım:[/bold]\n"
+            "  {text}\n"
+            "Kullanmak için Enter'a bas, kendin yaz ya da boş bırakmak "
+            "için h yaz."
+        ),
+    },
+    "back_cover.ai_failed": {
+        "en": "[yellow]The blurb couldn't be drafted ({error}); the back cover stays empty.[/yellow]",
+        "tr": "[yellow]Arka kapak yazısı hazırlanamadı ({error}); boş bırakıldı.[/yellow]",
+    },
+    # --- review turn (src/repl.py) --------------------------------
+    "review.prompt": {
+        "en": (
+            "[bold]The PDF is ready. Which pages have issues?[/bold] "
+            "Write the page number and what's wrong (e.g. \"page 3 text: "
+            "...\", \"hide page 5\"), or done to finish."
+        ),
+        "tr": (
+            "[bold]PDF hazır. Hangi sayfalarda sorun var?[/bold] Sayfa "
+            "numarasını ve sorunu yaz (ör. \"sayfa 3 metin: ...\", "
+            "\"sayfa 5'i gizle\"), bitirmek için tamam yaz."
+        ),
+    },
+    "review.done": {
+        "en": "[green]Done — your book is in .book-gen/output/.[/green]",
+        "tr": "[green]Tamamdır — kitabın .book-gen/output/ klasöründe.[/green]",
+    },
     # --- agent progress indicator ------------------------------------
     # ``progress.<tool name>`` labels the long-running tools; any other
     # tool falls back to ``progress.working``.
     "progress.thinking": {"en": "Thinking…", "tr": "Düşünüyorum…"},
     "progress.working": {"en": "Working…", "tr": "Çalışıyorum…"},
+    "progress.drafting": {"en": "Drafting…", "tr": "Taslak hazırlanıyor…"},
     "progress.generate_cover_illustration": {
         "en": "Generating the cover illustration…",
         "tr": "Kapak resmi üretiliyor…",
@@ -171,6 +250,14 @@ AUTHOR_LABELS: dict[str, tuple[str, ...]] = {
     "en": ("author", "written by"),
     "tr": ("yazar", "yazan"),
 }
+
+
+# Replies that end the review turn ("nothing to fix"). All languages
+# count: the user may answer in either.
+REVIEW_DONE_ANSWERS: frozenset[str] = frozenset({
+    "done", "ok", "okay", "none", "ship", "ship it", "nothing", "no",
+    "tamam", "bitti", "yok", "sorun yok", "hayır", "hayir", "tamamdır",
+})
 
 
 def t(key: str, lang: str) -> str:

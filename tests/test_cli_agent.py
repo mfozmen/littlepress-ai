@@ -1,4 +1,4 @@
-"""CLI + agent integration: PDF arg + real provider → agent greets."""
+"""CLI + agent integration: PDF arg + real provider → setup, render, review."""
 
 import io
 
@@ -60,40 +60,19 @@ class _StubLLM:
         return self._responses.pop(0)
 
 
-def test_agent_reads_draft_and_greets_when_pdf_preloaded(tmp_path):
+def test_preloaded_draft_is_rendered_and_reviewed_without_the_agent(tmp_path):
+    """Setup, render and the review question are code: a live agent once
+    said "I'll render now" and stopped. No agent turn runs before the
+    user's first review reply."""
     from src import draft as draft_mod
 
     pdf = _write_pdf(tmp_path)
     draft = draft_mod.from_pdf(pdf, tmp_path / ".book-gen" / "images")
-
-    # LLM first asks for read_draft, then greets.
-    llm = _StubLLM(
-        [
-            AgentResponse(
-                content=[
-                    {
-                        "type": "tool_use",
-                        "id": "t1",
-                        "name": "read_draft",
-                        "input": {},
-                    }
-                ],
-                stop_reason="tool_use",
-            ),
-            AgentResponse(
-                content=[
-                    {"type": "text", "text": "Hi! I see 1 page with a drawing. Ready?"}
-                ],
-                stop_reason="end_turn",
-            ),
-        ]
-    )
+    llm = _StubLLM([])
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        # Answer the deterministic metadata prompts, then EOF so the
-        # greeting fires and the read_loop exits cleanly.
         read_line=_scripted(list(_METADATA_ANSWERS)),
         console=console,
         provider=find("anthropic"),
@@ -103,13 +82,9 @@ def test_agent_reads_draft_and_greets_when_pdf_preloaded(tmp_path):
     repl.set_draft(draft)
 
     assert repl.run() == 0
-    out = buf.getvalue()
-    # The greeting surfaced.
-    assert "I see 1 page" in out
-    # Two LLM turns: one asked for read_draft, one replied.
-    assert len(llm.calls) == 2
-    # read_draft was offered as a tool.
-    assert "read_draft" in llm.calls[0]["tools"]
+    assert llm.calls == []
+    assert (tmp_path / ".book-gen" / "output" / "t.pdf").is_file()
+    assert "Which pages have issues?" in buf.getvalue()
 
 
 def test_agent_does_not_greet_on_offline_provider(tmp_path):
@@ -134,7 +109,7 @@ def test_agent_does_not_greet_on_offline_provider(tmp_path):
     assert "I see" not in buf.getvalue()
 
 
-def test_agent_greeting_failure_does_not_crash_repl(tmp_path):
+def test_agent_failure_in_the_review_turn_does_not_crash_repl(tmp_path):
     from src import draft as draft_mod
 
     pdf = _write_pdf(tmp_path)
@@ -147,7 +122,7 @@ def test_agent_greeting_failure_does_not_crash_repl(tmp_path):
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        read_line=_scripted(list(_METADATA_ANSWERS)),
+        read_line=_scripted([*_METADATA_ANSWERS, "page 1 text: hi"]),
         console=console,
         provider=find("anthropic"),
         session_root=tmp_path,
@@ -196,7 +171,7 @@ def test_agent_typo_fix_auto_applies(tmp_path):
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
     repl = Repl(
-        read_line=_scripted([*_METADATA_ANSWERS, "/exit"]),
+        read_line=_scripted([*_METADATA_ANSWERS, "page 1 says dragn", "/exit"]),
         console=console,
         provider=find("anthropic"),
         session_root=tmp_path,
@@ -205,42 +180,18 @@ def test_agent_typo_fix_auto_applies(tmp_path):
     repl.set_draft(draft)
 
     assert repl.run() == 0
-    # Fix was auto-applied — no y/n required.
+    # Fix was auto-applied — no y/n required — and the app re-rendered
+    # and asked again without the agent calling render_book.
     assert draft.pages[0].text == "the dragon was sad"
+    assert buf.getvalue().count("Which pages have issues?") == 2
 
 
-def test_agent_render_tool_produces_pdf_and_booklet(tmp_path):
-    """End-to-end: agent calls render_book with impose, the renderer
-    writes both PDFs to disk."""
+def test_setup_renders_the_pdf_and_booklet(tmp_path):
+    """The app renders both PDFs itself right after the setup questions."""
     from src import draft as draft_mod
 
     pdf = _write_pdf(tmp_path)
     draft = draft_mod.from_pdf(pdf, tmp_path / ".book-gen" / "images")
-    # Title and cover are now collected by the deterministic metadata
-    # prompts (title/author/series/cover/back-cover), not by pre-
-    # seeding the draft — the pre-set values would be overwritten on
-    # run() anyway (fresh-session-per-book design; no memory-restore
-    # skip-already-set branching). So script the answers instead.
-
-    llm = _StubLLM(
-        [
-            AgentResponse(
-                content=[
-                    {
-                        "type": "tool_use",
-                        "id": "t1",
-                        "name": "render_book",
-                        "input": {"impose": True},
-                    }
-                ],
-                stop_reason="tool_use",
-            ),
-            AgentResponse(
-                content=[{"type": "text", "text": "Done — your book is ready."}],
-                stop_reason="end_turn",
-            ),
-        ]
-    )
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100, no_color=True)
@@ -252,17 +203,58 @@ def test_agent_render_tool_produces_pdf_and_booklet(tmp_path):
         console=console,
         provider=find("anthropic"),
         session_root=tmp_path,
-        llm_factory=lambda _spec, _key: llm,
+        llm_factory=lambda _spec, _key: _StubLLM([]),
     )
     repl.set_draft(draft)
 
     assert repl.run() == 0
     a5 = tmp_path / ".book-gen" / "output" / "my_book.pdf"
     booklet = tmp_path / ".book-gen" / "output" / "my_book_A4_booklet.pdf"
-    assert a5.is_file()
     assert a5.stat().st_size > 0
-    assert booklet.is_file()
     assert booklet.stat().st_size > 0
-    assert "your book is ready" in buf.getvalue().lower()
 
 
+def test_ai_cover_is_drafted_confirmed_and_generated_by_the_app(tmp_path):
+    """AI cover: the LLM only drafts the description; showing it, the
+    cost confirm and the generation are the app's."""
+    from src import draft as draft_mod
+
+    pdf = _write_pdf(tmp_path)
+    draft = draft_mod.from_pdf(pdf, tmp_path / ".book-gen" / "images")
+
+    class _ChatLLM(_StubLLM):
+        def chat(self, _messages):
+            return "A red kite over a hill"
+
+    class _Images:
+        LABEL = "Fake"
+        COST_USD = {"low": 0.01, "medium": 0.05, "high": 0.17}
+
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt, output_path, size, quality):
+            self.prompts.append(prompt)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (60, 80), (0, 0, 255)).save(output_path)
+
+    images = _Images()
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100, no_color=True)
+    repl = Repl(
+        # English, title, author, no series, AI cover, empty back cover,
+        # keep the drafted description, then yes to the cost confirm.
+        read_line=_scripted(["2", "T", "A", "n", "b", "a", "", "y"]),
+        console=console,
+        provider=find("anthropic"),
+        session_root=tmp_path,
+        llm_factory=lambda _spec, _key: _ChatLLM([]),
+    )
+    repl.set_draft(draft)
+    repl._image_provider = images
+    repl._refresh_image_provider = lambda: None  # keep the fake across run()
+
+    assert repl.run() == 0
+    assert images.prompts == ["A red kite over a hill"]
+    assert draft.cover_image is not None and draft.cover_image.is_file()
+    assert "Which pages have issues?" in buf.getvalue()
