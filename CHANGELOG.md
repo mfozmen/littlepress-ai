@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v1.25.3 (2026-10-25)
+
+### Bug Fixes
+
+- **agent**: Reply in the user's language and surface failed covers
+  ([#101](https://github.com/mfozmen/littlepress-ai/pull/101),
+  [`a8e9a3c`](https://github.com/mfozmen/littlepress-ai/commit/a8e9a3c375a5ce978f09f0bdcd1b1a441ebccf35))
+
+Found in a live session:
+
+- The setup questions were Turkish but the agent answered in English. collect_metadata now returns
+  the language it asked in and the greeting tells the agent to reply in it. - The agent re-asked
+  "page drawing or AI?" after the user had picked AI. The AI cover branch now says the choice is
+  already made, and the OpenAI chat default moves from gpt-4o-mini to gpt-5.4-mini. - The validation
+  ping sent max_tokens=1, which GPT-5 models reject; it now sends max_completion_tokens=16. - A
+  failed cover call was followed by "PDF ready" with no mention of the failure. Illustration
+  failures now tell the agent to report it to the user first, and the image timeout goes from 120 s
+  to 300 s.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.25.2 (2026-10-25)
 
 ### Bug Fixes
@@ -10,6 +32,11 @@
   [`be2081e`](https://github.com/mfozmen/littlepress-ai/commit/be2081ed539fca779103a9befe2c1733a4210b5e))
 
 Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.25.2 [skip ci]
+  ([`4f3ec1e`](https://github.com/mfozmen/littlepress-ai/commit/4f3ec1e2eec5d7e55d7772fbed5722ba24a95006))
 
 
 ## v1.25.1 (2026-10-25)
