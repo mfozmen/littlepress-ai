@@ -163,6 +163,23 @@ def test_confirm_accepts_english_yes_tokens_only(tmp_path):
         )
 
 
+def test_confirm_pauses_the_agent_progress_indicator(tmp_path):
+    """The cost confirm runs inside a tool, while the agent's live
+    indicator is animating; it must be hidden while the user types."""
+    repl = _repl(tmp_path, provider_name="none", api_key=None)
+    live_while_reading: list[bool] = []
+
+    def _read():
+        live_while_reading.append(repl._agent._progress.live.is_started)
+        return "y"
+
+    repl._read = _read
+    with repl._agent._working("Working…"):
+        assert repl._confirm("spend money?") is True
+
+    assert live_while_reading == [False]
+
+
 def test_confirm_plumbing_only_wired_to_cost_tools():
     """Regression guard: after the review-based-gate refactor,
     ``Repl._confirm`` is only passed to the two AI illustration tools.

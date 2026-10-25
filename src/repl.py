@@ -700,11 +700,12 @@ class Repl:
         the per-language token set will live in
         ``src/metadata_i18n.py`` alongside the metadata-prompt
         tokens, not as scattered literals here."""
-        self._console.print(f"[yellow]{prompt}[/yellow] (y/n)")
-        try:
-            answer = self._read().strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return False
+        with self._agent.paused():
+            self._console.print(f"[yellow]{prompt}[/yellow] (y/n)")
+            try:
+                answer = self._read().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return False
         return answer in {"y", "yes"}
 
     def _persist(self) -> None:
