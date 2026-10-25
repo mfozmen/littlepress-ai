@@ -53,7 +53,25 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "[bold]What's the title of the book?[/bold]",
         "tr": "[bold]Kitabın adı ne?[/bold]",
     },
+    "title.detected": {
+        "en": "[bold]The first page starts with “{title}”. Is that the book's title?[/bold] (y/n)",
+        "tr": "[bold]İlk sayfa “{title}” diye başlıyor. Kitabın adı bu mu?[/bold] (e/h)",
+    },
+    "title.detected_series": {
+        "en": (
+            "[bold]The first page starts with “{line}”. Is the book "
+            "“{title}”, volume {volume} of a series?[/bold] (y/n)"
+        ),
+        "tr": (
+            "[bold]İlk sayfa “{line}” diye başlıyor. Kitabın adı "
+            "“{title}”, serinin {volume}. kitabı mı?[/bold] (e/h)"
+        ),
+    },
     # --- author ----------------------------------------------------
+    "author.detected": {
+        "en": "[bold]The draft names “{author}” as the author. Is that right?[/bold] (y/n)",
+        "tr": "[bold]Taslakta yazar olarak “{author}” yazıyor. Doğru mu?[/bold] (e/h)",
+    },
     "author.prompt": {
         "en": "[bold]Who's the author?[/bold]",
         "tr": "[bold]Yazar kim?[/bold]",
@@ -144,6 +162,14 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Building the PDF…",
         "tr": "PDF hazırlanıyor…",
     },
+}
+
+
+# Labels a draft uses to name its author ("Yazar: Poyraz"). All languages
+# are matched: the draft's language can differ from the UI's.
+AUTHOR_LABELS: dict[str, tuple[str, ...]] = {
+    "en": ("author", "written by"),
+    "tr": ("yazar", "yazan"),
 }
 
 

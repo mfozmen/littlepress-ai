@@ -717,6 +717,7 @@ def test_collect_metadata_strips_duplicate_title_header_from_first_page(tmp_path
     collect_metadata(
         draft,
         _scripted([
+            "n",               # decline the title found on page 1
             "Yavru Dinazor",   # title
             "Ece",              # author
             "y", "1",           # series + volume → title becomes "Yavru Dinazor - 1"
@@ -785,3 +786,136 @@ def test_collect_metadata_asks_the_language_first(tmp_path, monkeypatch):
     assert out.index("English") < out.index("Kitabın adı ne?")
     assert choices.lang == "tr"
     assert os.environ["LITTLEPRESS_LANG"] == "tr"
+
+
+# ---------------------------------------------------------------------------
+# Title / author suggested from the draft
+# ---------------------------------------------------------------------------
+# Live 2026-10-25: "Yavru Kedi 1.pdf" opens with "YAVRU KEDİ 1🐱" and ends
+# with "Yazar:Poyraz ÖZMEN", yet setup asked for both from scratch.
+
+from src.draft import DraftPage  # noqa: E402
+
+
+def _draft_with_text(tmp_path, *texts, hidden_last=False):
+    pages = [DraftPage(text=t) for t in texts]
+    if hidden_last:
+        pages[-1].hidden = True
+    return Draft(source_pdf=tmp_path / "x.pdf", pages=pages)
+
+
+@pytest.mark.parametrize(
+    "first_page, expected",
+    [
+        ("YAVRU KEDİ 1🐱\nBir gün zeytin adlı bir kedi varmış.", ("YAVRU KEDİ", 1)),
+        ("    \n   YAVRU KEDI 2.\n🐱\nBir gün sonra", ("YAVRU KEDI", 2)),
+        ("The Brave Owl\nOnce upon a time", ("The Brave Owl", None)),
+        ("Owl Tales - 3\nOnce", ("Owl Tales", 3)),
+        # A story sentence, a lone line, or no text is not a title.
+        ("Once upon a time there was a very brave owl.\nShe flew.", None),
+        ("The Brave Owl", None),
+        ("", None),
+        ("123\nstory", None),
+    ],
+)
+def test_suggest_title(tmp_path, first_page, expected):
+    from src.metadata_prompts import suggest_title
+
+    assert suggest_title(_draft_with_text(tmp_path, first_page)) == expected
+
+
+def test_suggest_title_needs_a_visible_page(tmp_path):
+    from src.metadata_prompts import suggest_title
+
+    draft = _draft_with_text(tmp_path, "Title\nstory", hidden_last=True)
+
+    assert suggest_title(draft) is None
+
+
+def test_suggest_title_skips_hidden_pages(tmp_path):
+    from src.metadata_prompts import suggest_title
+
+    draft = _draft_with_text(tmp_path, "Old Title\nx", "New Title\ny")
+    draft.pages[0].hidden = True
+
+    assert suggest_title(draft) == ("New Title", None)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("8\nYazar:Poyraz ÖZMEN \nResimleyen:Poyraz ÖZMEN ", "Poyraz ÖZMEN"),
+        ("Author: Ece", "Ece"),
+        ("written by : Ece Yılmaz", "Ece Yılmaz"),
+        ("The author said hi", None),
+        ("Yazar:", None),
+    ],
+)
+def test_suggest_author(tmp_path, text, expected):
+    from src.metadata_prompts import suggest_author
+
+    # The colophon page is often already hidden; it still names the author.
+    draft = _draft_with_text(tmp_path, "story", text, hidden_last=True)
+
+    assert suggest_author(draft) == expected
+
+
+def test_collect_metadata_confirms_detected_title_series_and_author(tmp_path, monkeypatch):
+    from src.metadata_prompts import collect_metadata
+
+    draft = _draft_with_text(
+        tmp_path, "YAVRU KEDİ 1🐱\nBir gün", "Yazar:Poyraz ÖZMEN", hidden_last=True
+    )
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=200, no_color=True)
+
+    collect_metadata(draft, _scripted(["e", "e", "c", "a"]), console, lang="tr")
+
+    assert draft.title == "YAVRU KEDİ - 1"
+    assert draft.author == "Poyraz ÖZMEN"
+    out = buf.getvalue()
+    assert "serinin 1. kitabı" in out
+    assert "Kitabın adı ne?" not in out
+    assert "serinin parçası" not in out
+    # The duplicate header is still dropped from page 1.
+    assert draft.pages[0].text.strip() == "Bir gün"
+
+
+def test_collect_metadata_falls_back_to_questions_on_no(tmp_path):
+    from src.metadata_prompts import collect_metadata
+
+    draft = _draft_with_text(tmp_path, "The Brave Owl\nOnce", "Author: Ece")
+
+    collect_metadata(
+        draft,
+        _scripted(["n", "Owl", "n", "Mia", "n", "c", "a"]),
+        _console(),
+        lang="en",
+    )
+
+    assert draft.title == "Owl"
+    assert draft.author == "Mia"
+
+
+def test_confirmed_title_without_a_number_still_asks_about_a_series(tmp_path):
+    from src.metadata_prompts import collect_metadata
+
+    draft = _draft_with_text(tmp_path, "The Brave Owl\nOnce")
+
+    collect_metadata(
+        draft, _scripted(["y", "Ece", "y", "2", "c", "a"]), _console(), lang="en"
+    )
+
+    assert draft.title == "The Brave Owl - 2"
+
+
+def test_confirm_reprompts_on_unclear_answer(tmp_path):
+    from src.metadata_prompts import collect_metadata
+
+    draft = _draft_with_text(tmp_path, "The Brave Owl\nOnce")
+
+    collect_metadata(
+        draft, _scripted(["maybe", "y", "Ece", "n", "c", "a"]), _console(), lang="en"
+    )
+
+    assert draft.title == "The Brave Owl"
