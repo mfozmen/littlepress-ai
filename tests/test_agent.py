@@ -271,3 +271,122 @@ def test_multiple_tool_calls_in_one_turn_all_executed():
     agent.say("do both")
 
     assert results == ["one", "two"]
+
+
+# --- progress indicator --------------------------------------------------
+
+
+class _ProbeLLM(_ScriptedLLM):
+    """Records what the progress indicator showed while ``turn`` ran."""
+
+    agent: Agent
+
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.seen: list[tuple[str, bool]] = []
+
+    def turn(self, messages, tools):
+        progress = self.agent._progress
+        task = progress.tasks[0]
+        self.seen.append((task.description, progress.live.is_started))
+        return super().turn(messages, tools)
+
+
+def test_agent_shows_a_live_indicator_while_the_llm_thinks(monkeypatch):
+    """A slow LLM turn used to leave the terminal silent, so users
+    thought the app had hung."""
+    monkeypatch.setenv("LITTLEPRESS_LANG", "en")
+    llm = _ProbeLLM([_text("done")])
+    agent, _ = _make_agent(llm)
+    llm.agent = agent
+
+    agent.say("hi")
+
+    assert llm.seen == [("Thinking…", True)]
+    assert agent._progress is None
+
+
+def test_agent_labels_the_indicator_with_the_running_tool(monkeypatch):
+    monkeypatch.setenv("LITTLEPRESS_LANG", "tr")
+    seen: list[str] = []
+    agent_ref: list[Agent] = []
+
+    def handler(_input):
+        seen.append(agent_ref[0]._progress.tasks[0].description)
+        return "ok"
+
+    tool = Tool("generate_cover_illustration", "", {"type": "object"}, handler)
+    agent, _ = _make_agent(
+        _ScriptedLLM([_tool_call("t1", tool.name, {}), _text("done")]), [tool]
+    )
+    agent_ref.append(agent)
+
+    agent.say("make a cover")
+
+    assert seen == ["Kapak resmi üretiliyor…"]
+
+
+def test_unknown_tools_get_a_generic_working_label(monkeypatch):
+    monkeypatch.setenv("LITTLEPRESS_LANG", "en")
+    seen: list[str] = []
+    agent_ref: list[Agent] = []
+
+    def handler(_input):
+        seen.append(agent_ref[0]._progress.tasks[0].description)
+        return "ok"
+
+    tool = Tool("set_metadata", "", {"type": "object"}, handler)
+    agent, _ = _make_agent(
+        _ScriptedLLM([_tool_call("t1", tool.name, {}), _text("done")]), [tool]
+    )
+    agent_ref.append(agent)
+
+    agent.say("x")
+
+    assert seen == ["Working…"]
+
+
+def test_paused_hides_the_indicator_and_resumes_it(monkeypatch):
+    """Tools that ask the user y/n must not type into a live spinner."""
+    states: list[bool] = []
+    agent_ref: list[Agent] = []
+
+    def handler(_input):
+        progress = agent_ref[0]._progress
+        with agent_ref[0].paused():
+            states.append(progress.live.is_started)
+        states.append(progress.live.is_started)
+        return "ok"
+
+    tool = Tool("t", "", {"type": "object"}, handler)
+    agent, _ = _make_agent(
+        _ScriptedLLM([_tool_call("t1", "t", {}), _text("done")]), [tool]
+    )
+    agent_ref.append(agent)
+
+    agent.say("x")
+
+    assert states == [False, True]
+
+
+def test_paused_is_a_no_op_when_nothing_is_running():
+    agent, _ = _make_agent(_ScriptedLLM([]))
+
+    with agent.paused():
+        pass
+
+    assert agent._progress is None
+
+
+def test_indicator_falls_back_to_ascii_on_a_non_utf8_console():
+    """A cp1254 / cp1252 stream can't encode the braille spinner; the
+    indicator must not crash the turn it is decorating."""
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1254", errors="strict")
+    console = Console(file=stream, force_terminal=True, width=80)
+    agent = Agent(llm=None, tools=[], console=console)
+
+    with agent._working("Kapak resmi üretiliyor…"):
+        agent._progress.refresh()
+
+    stream.flush()

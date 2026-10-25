@@ -112,6 +112,27 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "kapağa düşülüyor.[/yellow]"
         ),
     },
+    # --- agent progress indicator ------------------------------------
+    # ``progress.<tool name>`` labels the long-running tools; any other
+    # tool falls back to ``progress.working``.
+    "progress.thinking": {"en": "Thinking…", "tr": "Düşünüyorum…"},
+    "progress.working": {"en": "Working…", "tr": "Çalışıyorum…"},
+    "progress.generate_cover_illustration": {
+        "en": "Generating the cover illustration…",
+        "tr": "Kapak resmi üretiliyor…",
+    },
+    "progress.generate_page_illustration": {
+        "en": "Generating the page illustration…",
+        "tr": "Sayfa resmi üretiliyor…",
+    },
+    "progress.transcribe_page": {
+        "en": "Reading the page…",
+        "tr": "Sayfa okunuyor…",
+    },
+    "progress.render_book": {
+        "en": "Building the PDF…",
+        "tr": "PDF hazırlanıyor…",
+    },
 }
 
 

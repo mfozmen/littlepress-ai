@@ -18,10 +18,14 @@ translate in their adapter.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterator
 
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+from src.metadata_i18n import detect_lang, t
 
 
 @dataclass
@@ -64,6 +68,8 @@ class Agent:
         self._tool_list: list[Tool] = list(tools)
         self._console = console
         self._messages: list[dict] = []
+        # Live indicator shown while the LLM or a tool works; ``None`` when idle.
+        self._progress: Progress | None = None
 
     def say(self, user_text: str) -> None:
         """Append a user message and drive the loop until the LLM stops."""
@@ -72,7 +78,8 @@ class Agent:
 
     def _drive(self) -> None:
         while True:
-            response = self._llm.turn(self._messages, self._tool_list)
+            with self._working(t("progress.thinking", detect_lang())):
+                response = self._llm.turn(self._messages, self._tool_list)
             self._messages.append({"role": "assistant", "content": response.content})
             for block in response.content:
                 if block.get("type") == "text":
@@ -83,14 +90,58 @@ class Agent:
             for block in response.content:
                 if block.get("type") != "tool_use":
                     continue
+                lang = detect_lang()
+                label = t(f"progress.{block['name']}", lang) or t(
+                    "progress.working", lang
+                )
+                with self._working(label):
+                    content = self._run_tool(block["name"], block.get("input", {}))
                 tool_results.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": block["id"],
-                        "content": self._run_tool(block["name"], block.get("input", {})),
+                        "content": content,
                     }
                 )
             self._messages.append({"role": "user", "content": tool_results})
+
+    @contextmanager
+    def _working(self, label: str) -> Iterator[None]:
+        """Show a spinner, a pulsing bar and the elapsed time until the
+        block exits. There is no real percentage to show, so the bar is
+        indeterminate; it is erased when the work finishes."""
+        # The braille spinner can't be encoded on a cp125x stream (piped
+        # output on Windows); rich already makes the bar ASCII there.
+        utf = self._console.encoding.lower().startswith("utf")
+        progress = Progress(
+            SpinnerColumn("dots" if utf else "line"),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            console=self._console,
+            transient=True,
+        )
+        progress.add_task(label, total=None)
+        self._progress = progress
+        try:
+            with progress:
+                yield
+        finally:
+            self._progress = None
+
+    @contextmanager
+    def paused(self) -> Iterator[None]:
+        """Hide the live indicator while the user is asked something, so
+        the prompt and their typing don't collide with the animation."""
+        progress = self._progress
+        if progress is None:
+            yield
+            return
+        progress.stop()
+        try:
+            yield
+        finally:
+            progress.start()
 
     def _run_tool(self, name: str, input_: dict) -> str:
         tool = self._tools.get(name)
