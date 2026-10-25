@@ -14,6 +14,7 @@ from src.draft import (
     from_pdf,
     next_version_number,
     slugify,
+    strip_page_number,
     to_book,
 )
 
@@ -367,3 +368,42 @@ def test_to_book_excludes_hidden_pages(tmp_path):
     book = to_book(draft, tmp_path)
 
     assert [p.text for p in book.pages] == ["page 1", "page 3"]
+
+
+# --- strip_page_number ---------------------------------------------------
+# The child typed the page number at the end of each page; the renderer
+# prints its own, so the book showed it twice. Maintainer-approved:
+# drop ONLY a trailing token equal to the page's own number.
+
+
+@pytest.mark.parametrize(
+    "text, page_n, expected",
+    [
+        ("Ve o onla oynamış.\n2", 2, "Ve o onla oynamış."),
+        ("Ve o onla oynamış. 2", 2, "Ve o onla oynamış."),
+        ("oynamış.\n7 \n", 7, "oynamış."),
+        # Another number, or a number that is part of a word, stays.
+        ("Üç kedi olmuş. 3", 5, "Üç kedi olmuş. 3"),
+        ("Saat 12", 2, "Saat 12"),
+        # Text that is nothing but the number may be the child's content.
+        ("4", 4, "4"),
+        ("", 1, ""),
+    ],
+)
+def test_strip_page_number(text, page_n, expected):
+    assert strip_page_number(text, page_n) == expected
+
+
+def test_from_pdf_drops_the_typed_page_number(tmp_path):
+    path = tmp_path / "draft.pdf"
+    c = canvas.Canvas(str(path), pagesize=A5)
+    for n, line in enumerate(["Once upon", "they played."], start=1):
+        c.setFont("Helvetica", 14)
+        c.drawString(50, 400, line)
+        c.drawString(50, 100, str(n))
+        c.showPage()
+    c.save()
+
+    draft = from_pdf(path, tmp_path / "images")
+
+    assert [p.text.strip() for p in draft.pages] == ["Once upon", "they played."]

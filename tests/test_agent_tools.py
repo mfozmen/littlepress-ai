@@ -3934,18 +3934,22 @@ def test_restore_page_does_not_pick_extracted_drawing_companion(tmp_path):
     )
 
 
-def test_restore_page_prefers_png_when_both_exist(tmp_path):
-    """Determinism: when both .png and .jpg exist for the same page,
-    prefer .png."""
+def test_restore_page_picks_the_newest_original_when_extensions_differ(tmp_path):
+    """Two books ingested in the same folder leave ``page-01.png`` from
+    the old one next to ``page-01.jpg`` from the current one. Restore
+    must re-attach the current book's drawing, not the old book's."""
+    import os
+
     from PIL import Image
     from src.agent_tools import restore_page_tool
 
     images = tmp_path / ".book-gen" / "images"
     images.mkdir(parents=True)
-    png = images / "page-01.png"
-    jpg = images / "page-01.jpg"
-    Image.new("RGB", (40, 40), "red").save(png)
-    Image.new("RGB", (40, 40), "blue").save(jpg, "JPEG")
+    old_png = images / "page-01.png"
+    new_jpg = images / "page-01.jpg"
+    Image.new("RGB", (40, 40), "red").save(old_png)
+    Image.new("RGB", (40, 40), "blue").save(new_jpg, "JPEG")
+    os.utime(old_png, (1_700_000_000, 1_700_000_000))
 
     draft = Draft(
         source_pdf=tmp_path / "draft.pdf",
@@ -3958,7 +3962,7 @@ def test_restore_page_prefers_png_when_both_exist(tmp_path):
 
     tool.handler({"page": 1})
 
-    assert draft.pages[0].image == png
+    assert draft.pages[0].image == new_jpg
 
 
 def test_transcribe_page_unknown_sentinel_fallback_preserves_image_and_layout(tmp_path):
@@ -4198,3 +4202,15 @@ def test_transcribe_page_mixed_sentinel_swaps_in_an_extracted_drawing(tmp_path):
     assert draft.pages[0].layout == "image-top"
     assert source.is_file(), "the original raster must survive for restore_page"
     assert "drawing extracted" in result
+
+
+def test_ocr_reply_drops_the_typed_page_number():
+    """Vision OCR reads the number the child typed at the page foot;
+    the renderer prints its own, so it must not reach page.text."""
+    from src.agent_tools import apply_sentinel_result
+
+    page = DraftPage(text="", image=None)
+
+    apply_sentinel_result(page, "<TEXT>\nOndan sonra oynamış. 7", 7, "vision")
+
+    assert page.text == "Ondan sonra oynamış."

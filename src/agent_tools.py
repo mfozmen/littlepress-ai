@@ -56,7 +56,7 @@ from typing import Callable
 
 from src.agent import Tool
 from src.builder import build_pdf
-from src.draft import Draft, slugify, to_book
+from src.draft import Draft, slugify, strip_page_number, to_book
 from src.imposition import impose_a5_to_a4
 from src.prune import prune
 from src.providers.image import ImageGenerationError, ImageProvider
@@ -515,12 +515,9 @@ def restore_page_tool(
             # instead — defeating the whole point of restore_page.
             and p.stem == stem
         )
-        # Prefer PNG if the same page has multiple extensions on disk
-        # (deterministic — png is lossless, so keep it when present).
-        original = next(
-            (p for p in candidates if p.suffix.lower() == ".png"),
-            candidates[0] if candidates else None,
-        )
+        # Several extensions mean an earlier book was ingested in the same
+        # folder (each ingest writes one); the newest is this book's.
+        original = max(candidates, key=lambda p: p.stat().st_mtime, default=None)
         if original is not None:
             page.image = original
             return f"Page {page_n} restored (image re-attached, unhidden)."
@@ -1031,6 +1028,7 @@ def apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
     # the agent tends to re-display it to the user and default to
     # per-page approval prompts. The user audits page text in the
     # rendered PDF, not in chat.
+    reply = strip_page_number(reply, page_n)
     if method == "tesseract":
         # Tesseract raw text: apply as TEXT sentinel behaviour.
         page.text = reply
@@ -1043,6 +1041,7 @@ def apply_sentinel_result(page, reply: str, page_n: int, method: str) -> str:
         )
 
     sentinel, body = extract_sentinel(reply)
+    body = strip_page_number(body, page_n)
 
     if sentinel == _BLANK_SENTINEL:
         page.hidden = True

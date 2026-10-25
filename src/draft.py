@@ -61,12 +61,22 @@ def from_pdf(pdf_path: Path, images_dir: Path) -> Draft:
     n = max(len(texts), len(images))
     pages = [
         DraftPage(
-            text=texts[i] if i < len(texts) else "",
+            text=strip_page_number(texts[i], i + 1) if i < len(texts) else "",
             image=images[i] if i < len(images) else None,
         )
         for i in range(n)
     ]
     return Draft(source_pdf=pdf_path, pages=pages)
+
+
+def strip_page_number(text: str, page_n: int) -> str:
+    """Drop a trailing page number the child typed (``"...oynamış.\n2"``
+    on page 2). The renderer prints its own, so it showed twice.
+
+    Only a whitespace-separated final token equal to ``page_n`` goes;
+    every other character of the child's text is left as-is.
+    """
+    return re.sub(rf"\s+{page_n}\s*\Z", "", text)
 
 
 def slugify(text: str) -> str:

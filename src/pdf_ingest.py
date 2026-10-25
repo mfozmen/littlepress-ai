@@ -28,7 +28,7 @@ def extract_images(
 
     Returns one entry per page: a Path to the saved image, or None when the
     page has no embedded image. Pages with multiple images keep only the
-    first — downstream gap-fill can ask if that's wrong.
+    first one that isn't a blank single-tone background.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -39,12 +39,26 @@ def extract_images(
         if not images:
             results.append(None)
             continue
-        src = images[0]
+        src = _first_illustration(images)
         ext = _extension_for(src)
         dest = out_dir / f"page-{i:02d}.{ext}"
         dest.write_bytes(src.data)
         results.append(dest)
     return results
+
+
+def _first_illustration(images: list):
+    """Skip full-page "paper" backgrounds some drafts lay under the real
+    picture; a lone image is kept even if blank."""
+    if len(images) == 1:
+        return images[0]
+    return next((im for im in images if not _is_blank(im.image)), images[0])
+
+
+def _is_blank(image) -> bool:
+    low, high = image.convert("L").getextrema()
+    # Small spread tolerates JPEG noise on a flat background.
+    return high - low <= 8
 
 
 def _extension_for(image_file) -> str:
