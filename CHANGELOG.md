@@ -1,6 +1,106 @@
 # CHANGELOG
 
 
+## v1.23.0 (2026-10-25)
+
+### Continuous Integration
+
+- Fail the job when tests fail ([#93](https://github.com/mfozmen/littlepress-ai/pull/93),
+  [`b113e5a`](https://github.com/mfozmen/littlepress-ai/commit/b113e5aa3368de3d5f6aa81962f7b488b6276a8d))
+
+The pytest step carried ``continue-on-error: true``, so a red suite still reported green. That's
+  exactly how ``test_repl_drag_drop.py::test_non_pdf_path_goes_to_chat`` stayed broken on main for
+  months — CI printed ``1 failed, 792 passed`` and passed the job anyway (fixed in #91). Coverage
+  measured on a run whose tests failed isn't worth uploading, so letting the failure stop the job
+  costs nothing.
+
+Also drops ``--cov=build``: build.py was removed in #38, so that flag has been measuring a module
+  that doesn't exist.
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- Generate covers with Gemini and fix retired image/chat models
+  ([#94](https://github.com/mfozmen/littlepress-ai/pull/94),
+  [`cdcba9f`](https://github.com/mfozmen/littlepress-ai/commit/cdcba9f75ab2a75005d4129eca2dda47ff021b1f))
+
+- Add GoogleImageProvider (gemini-nano-banana-2.1). Auto-wires from a Gemini chat key; selectable
+  via `/image-model google`. - Switch OpenAI images to gpt-image-2; gpt-image-1 now returns "model
+  does not exist". - Move Gemini chat + key validation off gemini-2.5-flash, which Google now limits
+  to accounts that already used it, so new keys failed. - Round-trip Gemini 3 thought_signature on
+  function calls so multi-step tool use doesn't 400. - Cost confirm quotes the active provider's
+  name and price instead of a hard-coded OpenAI table.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- 100% coverage + zero SonarCloud issues ([#90](https://github.com/mfozmen/littlepress-ai/pull/90),
+  [`bb15034`](https://github.com/mfozmen/littlepress-ai/commit/bb15034d0b4a0e40eee33b62823175bed68163b9))
+
+* fix(memory): survive a draft.json whose page entry isn't a dict
+
+``_from_dict`` calls ``.get`` on every element of ``pages``. A hand-edited or partially-written
+  draft.json holding a list (or any non-dict) there raised AttributeError straight out of
+  ``load_draft`` — which the CLI calls at startup, so the launch crashed instead of falling back to
+  a fresh ingest. Widen the guard to match the other malformed-shape cases.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+* test: reach 100% line coverage and clear the SonarCloud smells
+
+SonarCloud sat at 98.1% line coverage with two open code smells. Both smells are gone and every
+  remaining uncovered line is now either tested or deleted.
+
+Smells (src/repl.py): - S3626 redundant ``return`` at the end of the image-provider restore. - S1066
+  nested ``if impose:`` / ``if _impose_to_file(...)`` merged.
+
+Deleted rather than tested — all three were unreachable or unused: - ``Agent.messages`` property (no
+  caller in src/ or tests/). - ``validator._unchecked`` (never registered in ``_CHECKERS``). -
+  ``draft.atomic_copy`` (only referenced from a docstring). - ``if genai is None`` / ``if openai is
+  None`` after a successful import.
+
+``try/except OSError: pass`` in prune + image became ``contextlib.suppress`` — same semantics, no
+  untestable branch.
+
+New tests cover the real gaps: vision-transcription SDK failure, the OCR method guard, the PNG
+  media-type fallback, the MIXED-sentinel drawing swap, Gemini/OpenAI empty-response shapes,
+  ingestion's per-page error path, back-cover image rendering, image-path validation, the
+  title-header helpers' no-op branches, the /image-model status and error surfaces, the
+  image-provider session restore, the cost-confirm EOF default, and the load path's ingestion +
+  greeting failure handling.
+
+The CI run skips ``test_yavru_dinozor_e2e.py`` (the fixture is the child's private PDF, not
+  committed), so its unique lines showed as uncovered on SonarCloud even though they passed locally.
+  Those paths now have public-fixture tests too: the suite is at 100% with OR without it.
+
+* test: hoist construction out of pytest.raises blocks (S5778)
+
+SonarCloud's PR analysis surfaced six S5778 violations — a ``pytest.raises`` block must contain
+  exactly one call that can throw, or a constructor blowing up would silently satisfy an assertion
+  aimed at the method. Build the provider (and the draft) first, assert on the call alone.
+
+Pre-existing in these files; they showed up as new because main hasn't been analysed since the
+  SONAR_TOKEN expired in May.
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+- Hoist spec lookup out of pytest.raises blocks (S5778)
+  ([#92](https://github.com/mfozmen/littlepress-ai/pull/92),
+  [`e5261b0`](https://github.com/mfozmen/littlepress-ai/commit/e5261b0df146dae2673c2432d1f8666f49855d34))
+
+Sixteen more S5778 violations surfaced once main got a fresh SonarCloud analysis (the previous one
+  predates the expired token, so the report was five months stale). Same shape as the batch in #90:
+  ``find("openai")`` inside the ``pytest.raises`` block is a second call that could throw, so a
+  registry lookup failing would satisfy an assertion aimed at ``validate_key``. Bind the spec first,
+  assert on the one call that's under test.
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v1.22.1 (2026-07-29)
 
 ### Bug Fixes
@@ -22,6 +122,11 @@ On Linux / macOS every absolute path starts with ``/``, so any line naming a non
   regression test monkeypatches the existence check so it reproduces on every platform.
 
 Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.22.1 [skip ci]
+  ([`acf1073`](https://github.com/mfozmen/littlepress-ai/commit/acf10739aa5166db767e083ddc3f5ae3bd396ba9))
 
 ### Documentation
 
