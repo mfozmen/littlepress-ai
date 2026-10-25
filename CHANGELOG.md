@@ -1,7 +1,29 @@
 # CHANGELOG
 
 
+## v1.25.0 (2026-10-25)
+
+### Features
+
+- Log every session to .book-gen/logs for later inspection
+  ([#98](https://github.com/mfozmen/littlepress-ai/pull/98),
+  [`a02bbcd`](https://github.com/mfozmen/littlepress-ai/commit/a02bbcde7c8f60e59773cefcc7c19fdad5581e63))
+
+A misbehaving session could only be debugged from a pasted terminal, which hides tool calls and
+  their results (e.g. a failed cover generation the agent never mentioned). Each run now writes
+  .book-gen/logs/session-<timestamp>.log with user input, agent replies, every tool call + result,
+  confirms, provider changes and crashes. API keys are read through read_secret and never logged.
+  The last 20 logs are kept.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.24.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.24.0 [skip ci]
+  ([`b924351`](https://github.com/mfozmen/littlepress-ai/commit/b924351a539e6bfcebdb3946dace7cdc760357bb))
 
 ### Features
 
