@@ -219,7 +219,8 @@ def test_memory_from_before_collect_input_migrates_on_first_relaunch(
 
     # Sanity: memory exists and keys off the legacy path.
     saved = memory.load_draft(tmp_path, expected_source=pdf)
-    assert saved is not None and saved.title == "Legacy Title"
+    assert saved is not None
+    assert saved.title == "Legacy Title"
 
     # First relaunch after upgrade — the CLI now collects the PDF
     # into .book-gen/input/, so expected_source is the hashed copy,

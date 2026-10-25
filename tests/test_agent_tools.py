@@ -354,7 +354,8 @@ def test_propose_typo_fix_rejects_out_of_range_page():
         {"page": 99, "before": "hi", "after": "bye", "reason": "x"}
     )
 
-    assert "page" in result.lower() and ("99" in result or "out of" in result.lower())
+    assert "page" in result.lower()
+    assert "99" in result or "out of" in result.lower()
     assert draft.pages[0].text == "hi"
 
 
@@ -437,7 +438,8 @@ def test_set_metadata_sets_title():
     result = tool.handler({"field": "title", "value": "The Brave Owl"})
 
     assert draft.title == "The Brave Owl"
-    assert "title" in result.lower() and "the brave owl" in result.lower()
+    assert "title" in result.lower()
+    assert "the brave owl" in result.lower()
 
 
 def test_set_metadata_sets_author():
@@ -523,7 +525,8 @@ def test_set_cover_copies_page_image_to_cover():
     result = tool.handler({"page": 2})
 
     assert draft.cover_image == img
-    assert "cover" in result.lower() and "2" in result
+    assert "cover" in result.lower()
+    assert "2" in result
 
 
 def test_set_cover_rejects_page_without_image():
@@ -2691,7 +2694,8 @@ def test_propose_layouts_rejects_partial_proposals():
         }
     )
 
-    assert "3" in result and ("1" in result or "partial" in result.lower())
+    assert "3" in result
+    assert "1" in result or "partial" in result.lower()
 
 
 def test_propose_layouts_rejects_invalid_layout_value():
@@ -2731,9 +2735,8 @@ def test_propose_layouts_enforces_text_only_for_imageless_pages():
     )
 
     assert draft.pages[2].layout != "image-full"
-    assert "3" in result and (
-        "no image" in result.lower() or "no drawing" in result.lower()
-    )
+    assert "3" in result
+    assert "no image" in result.lower() or "no drawing" in result.lower()
 
 
 
@@ -4136,7 +4139,8 @@ def test_run_ocr_engine_rejects_unknown_method(tmp_path):
 
     assert reply == ""
     assert "magic" in error
-    assert "vision" in error and "tesseract" in error
+    assert "vision" in error
+    assert "tesseract" in error
 
 
 def test_build_image_block_defaults_to_png_for_unknown_extension(tmp_path):

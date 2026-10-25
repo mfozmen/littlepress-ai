@@ -56,7 +56,8 @@ def test_from_pdf_combines_text_and_images(tmp_path):
     assert draft.source_pdf == pdf
     assert len(draft.pages) == 3
     assert "page 1 text" in draft.pages[0].text
-    assert draft.pages[0].image is not None and draft.pages[0].image.exists()
+    assert draft.pages[0].image is not None
+    assert draft.pages[0].image.exists()
     assert "page 2 text" in draft.pages[1].text
     assert draft.pages[1].image is None
     assert draft.pages[2].text.strip() == ""

@@ -88,7 +88,8 @@ def test_anthropic_without_sdk_raises_provider_unavailable(monkeypatch):
         validator.validate_key(spec, "sk-test")
 
     msg = str(exc.value).lower()
-    assert "install" in msg and "anthropic" in msg
+    assert "install" in msg
+    assert "anthropic" in msg
 
     if real is not None:
         monkeypatch.setitem(sys.modules, "anthropic", real)
@@ -164,7 +165,9 @@ def test_anthropic_ping_sends_timeout_and_spec_model(monkeypatch):
 
     client_timeout = fake.Anthropic.last_timeout
     create_kwargs = fake.Anthropic.last_client.messages.last_create_kwargs
-    assert client_timeout is not None and client_timeout > 0 and client_timeout <= 30
+    assert client_timeout is not None
+    assert client_timeout > 0
+    assert client_timeout <= 30
     assert create_kwargs["model"] == spec.validation_model
 
 
@@ -233,7 +236,8 @@ def test_google_without_sdk_raises_provider_unavailable(monkeypatch):
     with pytest.raises(validator.ProviderUnavailable) as exc:
         validator.validate_key(spec, "key")
     msg = str(exc.value).lower()
-    assert "google-genai" in msg and "install" in msg
+    assert "google-genai" in msg
+    assert "install" in msg
 
 
 def test_google_rejects_key_on_api_key_not_valid_message(monkeypatch):
@@ -403,7 +407,8 @@ def test_openai_without_sdk_raises_provider_unavailable(monkeypatch):
     with pytest.raises(validator.ProviderUnavailable) as exc:
         validator.validate_key(spec, "sk-test")
     msg = str(exc.value).lower()
-    assert "openai" in msg and "install" in msg
+    assert "openai" in msg
+    assert "install" in msg
 
 
 def test_openai_rejects_key_when_sdk_signals_auth_error(monkeypatch):

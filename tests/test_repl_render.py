@@ -87,7 +87,8 @@ def test_render_writes_pdf_under_session_output_dir(tmp_path):
     output_dir = tmp_path / ".book-gen" / "output"
     assert output_dir.is_dir()
     stable = output_dir / "my_book.pdf"
-    assert stable.is_file() and stable.stat().st_size > 0
+    assert stable.is_file()
+    assert stable.stat().st_size > 0
     # Output location is surfaced to the user so they can find it.
     assert stable.name in buf.getvalue()
 
@@ -201,8 +202,10 @@ def test_render_with_impose_flag_writes_a5_and_a4_booklet(tmp_path):
     output_dir = tmp_path / ".book-gen" / "output"
     a5 = output_dir / "book.pdf"
     a4 = output_dir / "book_A4_booklet.pdf"
-    assert a5.is_file() and a5.stat().st_size > 0
-    assert a4.is_file() and a4.stat().st_size > 0
+    assert a5.is_file()
+    assert a5.stat().st_size > 0
+    assert a4.is_file()
+    assert a4.stat().st_size > 0
     # Both file names surface so the user can find them.
     assert a5.name in buf.getvalue()
     assert a4.name in buf.getvalue()

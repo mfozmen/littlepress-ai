@@ -72,12 +72,15 @@ def test_prune_removes_orphans_and_old_snapshots(tmp_path):
 
     # Default keep=3 — v1 dropped, v2/v3/v4 kept.
     assert not v1.exists()
-    assert v2.exists() and v3.exists() and v4.exists()
+    assert v2.exists()
+    assert v3.exists()
+    assert v4.exists()
     # Orphan image pruned.
     assert not orphan.exists()
     assert cover.exists()
     # User sees what was removed.
-    assert "1" in buf.getvalue() and "orphan" in buf.getvalue().lower()
+    assert "1" in buf.getvalue()
+    assert "orphan" in buf.getvalue().lower()
 
 
 def test_prune_dry_run_keeps_files(tmp_path):

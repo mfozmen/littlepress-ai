@@ -91,7 +91,8 @@ def test_anthropic_provider_passes_bounded_timeout_to_sdk(monkeypatch):
     # inspect the constructor arg directly.
     # Rebuild assertion: the fake client stores timeout alongside api_key.
     assert hasattr(last, "timeout")
-    assert last.timeout is not None and 0 < last.timeout <= 300
+    assert last.timeout is not None
+    assert 0 < last.timeout <= 300
 
 
 def test_anthropic_provider_without_sdk_raises_import_error(monkeypatch):
@@ -138,7 +139,8 @@ def test_llm_provider_is_usable_as_type_hint():
     # implementation.
     p: LLMProvider = NullProvider()
     q: LLMProvider = AnthropicProvider(api_key="x")
-    assert p is not None and q is not None
+    assert p is not None
+    assert q is not None
 
 
 # --- turn() (tool-use) ----------------------------------------------------
@@ -277,7 +279,8 @@ def test_anthropic_provider_turn_uses_bounded_timeout(monkeypatch):
         tools=[],
     )
     timeout = fake.Anthropic.last_client.timeout
-    assert timeout is not None and 0 < timeout <= 300
+    assert timeout is not None
+    assert 0 < timeout <= 300
 
 
 def test_block_to_dict_handles_blocks_without_model_dump(monkeypatch):
