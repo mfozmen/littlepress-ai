@@ -130,7 +130,7 @@ On first launch the shell asks which provider to use — Claude, GPT, Gemini, or
 - `src/cli.py` — the `littlepress` command-line entry point
 - `src/` — generator modules (schema, layout, PDF assembly, imposition, ingestion)
 - `tests/` — pytest suite, mirrors `src/`
-- `.book-gen/` — per-project state (input PDFs, generated images, output renders — all gitignored)
+- `.book-gen/` — per-project state (input PDFs, generated images, output renders, session logs — all gitignored). Each run writes `.book-gen/logs/session-<timestamp>.log` with what you typed, what the agent said and every tool it ran (API keys are never logged); the last 20 are kept. Attach the latest one when reporting a bug.
 
 ## Printing the A4 booklet
 

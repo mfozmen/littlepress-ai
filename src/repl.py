@@ -59,6 +59,7 @@ from src.providers.validator import (
 from src.colophon import detect_colophon_pages
 from src.ingestion import ingest_image_only_pages
 from src.metadata_prompts import collect_metadata
+from src.session_log import LOGGER
 
 
 SlashHandler = Callable[["Repl", str], int | None]
@@ -369,7 +370,8 @@ class Repl:
         validate: Callable[[ProviderSpec, str], None] | None = None,
         llm_factory: Callable[[ProviderSpec, str | None], LLMProvider] | None = None,
     ) -> None:
-        self._read = read_line
+        self._read = _logged(read_line)
+        # Keys come through here; it must stay out of the session log.
         self._read_secret = read_secret or read_line
         self._console = console
         self._provider = provider
@@ -568,6 +570,7 @@ class Repl:
         # dark (switched away with no explicit /image-model on record).
         self._refresh_image_provider()
         self._agent = self._build_agent()
+        LOGGER.info("provider: %s", spec.name)
         self._console.print(f"[green]Active model:[/green] {spec.display_name}\n")
         self._persist()
         if spec.requires_api_key and api_key:
@@ -700,6 +703,7 @@ class Repl:
         the per-language token set will live in
         ``src/metadata_i18n.py`` alongside the metadata-prompt
         tokens, not as scattered literals here."""
+        LOGGER.info("confirm: %s", prompt)
         with self._agent.paused():
             self._console.print(f"[yellow]{prompt}[/yellow] (y/n)")
             try:
@@ -1172,6 +1176,15 @@ _IMAGE_PROVIDERS: dict[str, type] = {
     "openai": OpenAIImageProvider,
     "google": GoogleImageProvider,
 }
+
+
+def _logged(read_line: Callable[[], str]) -> Callable[[], str]:
+    def read() -> str:
+        line = read_line()
+        LOGGER.info("input: %s", line)
+        return line
+
+    return read
 
 
 def _cmd_image_model(repl: Repl, args: str) -> None:

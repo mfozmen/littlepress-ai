@@ -18,6 +18,7 @@ translate in their adapter.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Iterator
@@ -26,6 +27,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from src.metadata_i18n import detect_lang, t
+from src.session_log import LOGGER
 
 
 @dataclass
@@ -73,6 +75,7 @@ class Agent:
 
     def say(self, user_text: str) -> None:
         """Append a user message and drive the loop until the LLM stops."""
+        LOGGER.info("user: %s", user_text)
         self._messages.append({"role": "user", "content": user_text})
         self._drive()
 
@@ -83,6 +86,7 @@ class Agent:
             self._messages.append({"role": "assistant", "content": response.content})
             for block in response.content:
                 if block.get("type") == "text":
+                    LOGGER.info("assistant: %s", block["text"])
                     self._console.print(block["text"])
             if response.stop_reason != "tool_use":
                 return
@@ -144,10 +148,19 @@ class Agent:
             progress.start()
 
     def _run_tool(self, name: str, input_: dict) -> str:
+        LOGGER.info(
+            "tool_use %s %s", name, json.dumps(input_, ensure_ascii=False, default=str)
+        )
+        result = self._call_tool(name, input_)
+        LOGGER.info("tool_result %s: %s", name, result)
+        return result
+
+    def _call_tool(self, name: str, input_: dict) -> str:
         tool = self._tools.get(name)
         if tool is None:
             return f"Error: no such tool: {name}"
         try:
             return tool.handler(input_)
         except Exception as e:
+            LOGGER.exception("tool %s raised", name)
             return f"Error: {e}"

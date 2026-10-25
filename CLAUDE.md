@@ -37,7 +37,8 @@ Primary flow is `littlepress draft.pdf` → interactive agent → printable PDF.
 - `src/imposition.py` — 2-up saddle-stitch A4 booklet via `pypdf`.
 - `src/pdf_ingest.py` — text + image extraction from the input PDF.
 - `src/prune.py` — `.book-gen/` housekeeping. Drops orphan AI-generated images (`cover-<hex>.png` / `page-<hex>.png` patterns only, so the child's extracted drawings are never touched). Called silently at the end of every render (both `render_book` agent tool and REPL `/render`); exposed manually as `/prune`. The snapshot-PDF cleanup half is a no-op now that the versioned-snapshot system has been removed (PR #82). **Input-preserved guarantee:** `.book-gen/input/*` and `.book-gen/images/page-NN.*` are out of scope for prune by contract, not just by current regex coincidence — `restore_page` relies on these files still being present. `_AI_IMAGE_PATTERN` enforces the split.
-- `.book-gen/` — per-project runtime state (gitignored): `session.json`, `draft.json`, `input/`, `images/`, `output/`.
+- `src/session_log.py` — per-run log at `.book-gen/logs/session-<timestamp>.log` (last 20 kept): user input, agent replies, every tool call + result, crashes. API keys are read via `read_secret` and never logged. Read the latest one first when debugging a reported session.
+- `.book-gen/` — per-project runtime state (gitignored): `session.json`, `draft.json`, `input/`, `images/`, `output/`, `logs/`.
 
 ## Book schema
 

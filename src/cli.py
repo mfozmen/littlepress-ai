@@ -80,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from src import draft as draft_mod
     from src import memory as memory_mod
+    from src import session_log
     from src.providers.validator import validate_key
     from src.repl import Repl
 
@@ -103,6 +104,10 @@ def main(argv: list[str] | None = None) -> int:
         return getpass.getpass("")
 
     session_root = Path.cwd()
+    session_log.start(session_root)
+    session_log.LOGGER.info(
+        "littlepress %s, cwd=%s, pdf=%s", _resolve_version(), session_root, args.pdf
+    )
     repl = Repl(
         read_line=read_line,
         console=Console(),
@@ -118,7 +123,11 @@ def main(argv: list[str] | None = None) -> int:
         if rc != 0:
             return rc
 
-    return repl.run()
+    try:
+        return repl.run()
+    except Exception:
+        session_log.LOGGER.exception("crashed")
+        raise
 
 
 def _load_pdf_into_repl(
