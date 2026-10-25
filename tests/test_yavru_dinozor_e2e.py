@@ -221,8 +221,9 @@ def test_yavru_dinozor_renders_illustrations_and_no_duplicate_text(
         read_line=_scripted([
             f"/load {_FIXTURE}",
             "1",            # language: Turkish
+            "h",            # suggested title from page 1? no — type it
             "Yavru Dinozor",
-            "Poyraz Özmen",
+            "e",            # author found on the colophon page? yes
             "e",            # series? yes
             "1",            # volume
             "c",            # cover: poster

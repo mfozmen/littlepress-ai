@@ -39,13 +39,15 @@ Design notes:
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from rich.console import Console
+from rich.markup import escape
 
 from src.draft import Draft
-from src.metadata_i18n import _SUPPORTED, detect_lang, t
+from src.metadata_i18n import _SUPPORTED, AUTHOR_LABELS, detect_lang, t
 from src.title_strip import strip_title_header_from_first_page
 
 ReadLine = Callable[[], str]
@@ -160,18 +162,22 @@ def collect_series(
     volume number to ``draft.title`` as ``<title> - <n>``. No-op on
     a no."""
     lang = _resolve_lang(lang)
+    if _confirm(t("series.prompt", lang), read_line, console, lang):
+        volume = _prompt_volume(read_line, console, lang)
+        draft.title = f"{draft.title} - {volume}"
+
+
+def _confirm(prompt: str, read_line: ReadLine, console: Console, lang: str) -> bool:
+    """Ask a y/n question until the answer is one of the language's tokens."""
     yes_tokens = _YES_TOKENS.get(lang, _YES_TOKENS["en"])
     no_tokens = _NO_TOKENS.get(lang, _NO_TOKENS["en"])
     while True:
-        console.print(t("series.prompt", lang))
+        console.print(prompt)
         answer = read_line().strip().lower()
         if answer in yes_tokens:
-            volume = _prompt_volume(read_line, console, lang)
-            draft.title = f"{draft.title} - {volume}"
-            return
+            return True
         if answer in no_tokens:
-            return
-        # Gibberish — re-prompt.
+            return False
 
 
 def _prompt_volume(read_line: ReadLine, console: Console, lang: str) -> int:
@@ -299,9 +305,18 @@ def collect_metadata(
     # Explicit override that detect_lang() honours, so labels shown later
     # (e.g. the agent's progress indicator) follow the user's choice.
     os.environ["LITTLEPRESS_LANG"] = lang
-    collect_title(draft, read_line, console, lang=lang)
-    collect_author(draft, read_line, console, lang=lang)
-    collect_series(draft, read_line, console, lang=lang)
+    has_volume = _confirm_suggested_title(draft, read_line, console, lang)
+    if has_volume is None:
+        collect_title(draft, read_line, console, lang=lang)
+    author = suggest_author(draft)
+    if author and _confirm(
+        t("author.detected", lang).format(author=escape(author)), read_line, console, lang
+    ):
+        draft.author = author
+    else:
+        collect_author(draft, read_line, console, lang=lang)
+    if not has_volume:
+        collect_series(draft, read_line, console, lang=lang)
     cover = collect_cover_choice(draft, read_line, console, lang=lang)
     back_cover = collect_back_cover(draft, read_line, console, lang=lang)
     # The child often writes the book title at the top of the first
@@ -312,3 +327,73 @@ def collect_metadata(
     # with one. Idempotent — re-running ``/metadata`` is safe.
     strip_title_header_from_first_page(draft)
     return MetadataChoices(cover=cover, back_cover=back_cover, lang=lang)
+
+
+def _confirm_suggested_title(
+    draft: Draft, read_line: ReadLine, console: Console, lang: str
+) -> bool | None:
+    """Offer the title found on the first page. Returns ``None`` when
+    there was none or the user said no, otherwise whether the accepted
+    title carried a series volume."""
+    suggestion = suggest_title(draft)
+    if suggestion is None:
+        return None
+    title, volume = suggestion
+    if volume is None:
+        prompt = t("title.detected", lang).format(title=escape(title))
+    else:
+        prompt = t("title.detected_series", lang).format(
+            line=escape(f"{title} {volume}"), title=escape(title), volume=volume
+        )
+    if not _confirm(prompt, read_line, console, lang):
+        return None
+    draft.title = title if volume is None else f"{title} - {volume}"
+    return volume is not None
+
+
+_TITLE_MAX_WORDS = 6
+_TITLE_MAX_CHARS = 40
+
+
+def suggest_title(draft: Draft) -> tuple[str, int | None] | None:
+    """The child often writes the title as the first line of page one
+    (``YAVRU KEDİ 1🐱``). Returns ``(title, volume)`` when that line is
+    short and the story continues below it; a trailing number is read
+    as the series volume. Emoji and punctuation at the edges are
+    dropped — the cover font can't draw emoji."""
+    page = next((p for p in draft.pages if not p.hidden), None)
+    if page is None:
+        return None
+    lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+    alnum = [i for i, ch in enumerate(lines[0]) if ch.isalnum()]
+    line = lines[0][alnum[0] : alnum[-1] + 1] if alnum else ""
+    words = line.split()
+    if (
+        not any(ch.isalpha() for ch in line)
+        or len(line) > _TITLE_MAX_CHARS
+        or len(words) > _TITLE_MAX_WORDS
+    ):
+        return None
+    if len(words) > 1 and words[-1].isdecimal():
+        return " ".join(words[:-1]).rstrip(" -–—"), int(words[-1])
+    return line, None
+
+
+_AUTHOR_LINE = re.compile(
+    r"^\s*(?:"
+    + "|".join(re.escape(label) for labels in AUTHOR_LABELS.values() for label in labels)
+    + r")\s*:\s*(\S.*?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def suggest_author(draft: Draft) -> str | None:
+    """Find an ``Author: …`` / ``Yazar: …`` line anywhere in the draft,
+    hidden colophon pages included."""
+    for page in draft.pages:
+        match = _AUTHOR_LINE.search(page.text)
+        if match:
+            return match.group(1)
+    return None
