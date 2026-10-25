@@ -19,6 +19,7 @@ import pytest
 from src.providers.image import (
     ImageGenerationError,
     ImageProvider,
+    GoogleImageProvider,
     OpenAIImageProvider,
 )
 
@@ -74,7 +75,7 @@ def test_openai_image_provider_implements_image_provider_protocol():
     assert isinstance(provider, ImageProvider)
 
 
-def test_openai_image_provider_writes_png_bytes_to_output_path(
+def test_openai_image_provider_writes_jpeg_bytes_to_output_path(
     tmp_path, monkeypatch
 ):
     """Happy path: the b64-decoded response body lands at ``output_path``
@@ -120,7 +121,7 @@ def test_openai_image_provider_forwards_prompt_size_quality(
     assert captured["prompt"] == "a brave owl at dusk"
     assert captured["size"] == "1024x1536"
     assert captured["quality"] == "high"
-    assert captured["model"] == "gpt-image-1"
+    assert captured["model"] == "gpt-image-2"
 
 
 def test_openai_image_provider_creates_parent_dir_for_output(
@@ -320,3 +321,140 @@ def test_openai_image_provider_write_is_atomic(tmp_path, monkeypatch):
     # Restore in case further tests need it (monkeypatch unwinds, but
     # keeping the binding available clarifies intent).
     _ = real_replace
+
+
+# --- GoogleImageProvider (Gemini / Nano Banana) ------------------------
+
+
+def _jpeg_bytes(size=(4, 6)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", size, "red").save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _install_fake_google_image(monkeypatch, *, parts=None, raises=None):
+    """Fake ``google.genai`` whose ``generate_content`` records its
+    kwargs and answers with ``parts`` (inline_data blobs / text)."""
+    captured: dict = {}
+
+    class _Types:
+        class GenerateContentConfig:
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+        class ImageConfig:
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+        class HttpOptions:
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+    class _Models:
+        def generate_content(self, **kwargs):
+            captured.update(kwargs)
+            if raises is not None:
+                raise raises
+            content = types.SimpleNamespace(parts=parts)
+            return types.SimpleNamespace(
+                candidates=[types.SimpleNamespace(content=content)]
+            )
+
+    class _Client:
+        def __init__(self, **kwargs):
+            captured["client"] = kwargs
+            self.models = _Models()
+
+    genai_mod = types.ModuleType("google.genai")
+    genai_mod.Client = _Client
+    genai_mod.types = _Types
+    google_mod = types.ModuleType("google")
+    google_mod.genai = genai_mod
+    monkeypatch.setitem(sys.modules, "google", google_mod)
+    monkeypatch.setitem(sys.modules, "google.genai", genai_mod)
+    monkeypatch.setitem(sys.modules, "google.genai.types", _Types)
+    return captured
+
+
+def _image_part(data: bytes):
+    return types.SimpleNamespace(
+        text=None,
+        inline_data=types.SimpleNamespace(mime_type="image/jpeg", data=data),
+    )
+
+
+def test_google_image_provider_implements_image_provider_protocol():
+    assert isinstance(GoogleImageProvider(api_key="k"), ImageProvider)
+
+
+def test_google_image_provider_writes_a_real_png(tmp_path, monkeypatch):
+    """Gemini may answer with JPEG bytes; the contract is a PNG at
+    ``output_path``, so the provider re-encodes."""
+    from PIL import Image
+
+    _install_fake_google_image(monkeypatch, parts=[_image_part(_jpeg_bytes())])
+    out = tmp_path / "images" / "cover.png"
+
+    result = GoogleImageProvider(api_key="k").generate("a fox", out)
+
+    assert result == out
+    with Image.open(out) as img:
+        assert img.format == "PNG"
+        assert img.size == (4, 6)
+
+
+def test_google_image_provider_maps_size_and_quality(tmp_path, monkeypatch):
+    captured = _install_fake_google_image(
+        monkeypatch, parts=[_image_part(_jpeg_bytes())]
+    )
+
+    GoogleImageProvider(api_key="k").generate(
+        "a fox", tmp_path / "c.png", size="1024x1536", quality="high"
+    )
+
+    assert captured["model"] == GoogleImageProvider.MODEL
+    assert captured["contents"] == "a fox"
+    image_config = captured["config"].image_config
+    assert image_config.aspect_ratio == "2:3"
+    assert image_config.image_size == "4K"
+    assert captured["config"].response_modalities == ["IMAGE"]
+
+
+def test_google_image_provider_raises_when_no_image_comes_back(
+    tmp_path, monkeypatch
+):
+    text_only = types.SimpleNamespace(text="I can't draw that", inline_data=None)
+    _install_fake_google_image(monkeypatch, parts=[text_only])
+
+    with pytest.raises(ImageGenerationError, match="no image"):
+        GoogleImageProvider(api_key="k").generate("a fox", tmp_path / "c.png")
+
+
+def test_google_image_provider_wraps_sdk_errors(tmp_path, monkeypatch):
+    _install_fake_google_image(monkeypatch, raises=RuntimeError("quota"))
+
+    with pytest.raises(ImageGenerationError, match="quota"):
+        GoogleImageProvider(api_key="k").generate("a fox", tmp_path / "c.png")
+
+
+def test_google_image_provider_reports_a_missing_sdk(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "google", None)
+    monkeypatch.setitem(sys.modules, "google.genai", None)
+
+    with pytest.raises(ImageGenerationError, match="google-genai"):
+        GoogleImageProvider(api_key="k").generate("a fox", tmp_path / "c.png")
+
+
+def test_google_image_provider_rejects_unreadable_image_bytes(
+    tmp_path, monkeypatch
+):
+    _install_fake_google_image(monkeypatch, parts=[_image_part(b"not-an-image")])
+    out = tmp_path / "c.png"
+
+    with pytest.raises(ImageGenerationError, match="unreadable"):
+        GoogleImageProvider(api_key="k").generate("a fox", out)
+    assert not out.exists()

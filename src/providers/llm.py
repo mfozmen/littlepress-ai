@@ -84,7 +84,7 @@ SPECS: tuple[ProviderSpec, ...] = (
         "google",
         "Gemini (Google)",
         requires_api_key=True,
-        validation_model="gemini-2.5-flash",
+        validation_model="gemini-3.8-flash",
         key_url="https://aistudio.google.com/apikey",
         key_steps=(
             "Sign in to Google AI Studio.",
@@ -248,11 +248,11 @@ def _block_to_dict(block) -> dict:
     return {"type": btype}
 
 
-# Gemini default model — 2.5 Flash is tool-use capable and has a
-# generous free tier (1.5k req/day at time of writing), which is the
-# whole reason for adding this provider: users can run Littlepress
-# without a credit card.
-_GOOGLE_CHAT_MODEL = "gemini-2.5-flash"
+# Gemini default model — tool-use capable with a free tier, which is
+# the whole reason for adding this provider: users can run Littlepress
+# without a credit card. Not 2.5: Google limits the 2.5 family to
+# accounts that already used it, so fresh API keys get rejected.
+_GOOGLE_CHAT_MODEL = "gemini-3.8-flash"
 # Default timeout matches the Anthropic chat timeout — 60 s leaves room
 # for a normal reply while still surfacing a stuck network quickly
 # instead of letting the SDK's multi-minute default hang the REPL.
@@ -433,7 +433,10 @@ def _gemini_parts_from_blocks(
                     function_call=gtypes.FunctionCall(
                         name=block.get("name", ""),
                         args=block.get("input") or {},
-                    )
+                    ),
+                    # Gemini 3 rejects a function_call replayed without
+                    # the signature it was issued with.
+                    thought_signature=block.get("thought_signature"),
                 )
             )
         elif btype == "tool_result":
@@ -499,14 +502,16 @@ def _gemini_response_to_blocks(response) -> tuple[list[dict], str]:
         # one so the agent can correlate tool_use with its tool_result
         # when it fires back in the next turn.
         fc_id = getattr(fc, "id", None) or f"toolu_{uuid.uuid4().hex[:12]}"
-        blocks.append(
-            {
-                "type": "tool_use",
-                "id": fc_id,
-                "name": getattr(fc, "name", ""),
-                "input": dict(getattr(fc, "args", None) or {}),
-            }
-        )
+        block = {
+            "type": "tool_use",
+            "id": fc_id,
+            "name": getattr(fc, "name", ""),
+            "input": dict(getattr(fc, "args", None) or {}),
+        }
+        signature = getattr(part, "thought_signature", None)
+        if signature:
+            block["thought_signature"] = signature
+        blocks.append(block)
     # Surface non-STOP finish reasons so a blocked prompt isn't silent.
     finish_reason = getattr(candidate, "finish_reason", None)
     if (
