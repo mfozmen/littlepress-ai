@@ -469,3 +469,11 @@ def test_ai_cover_branch_says_the_choice_is_already_made():
     g = _build_agent_greeting(cover_choice="ai").lower()
 
     assert "already chose" in g
+
+
+def test_greeting_forbids_announcing_work_without_doing_it():
+    # Live 2026-10-25: "I'll now finish the cover and render" and then
+    # the turn ended, leaving the user at an idle prompt.
+    from src.repl import _build_agent_greeting
+
+    assert "Never end a reply by announcing what you will do" in _build_agent_greeting("ai", "ai-draft", "tr")

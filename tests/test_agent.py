@@ -8,7 +8,7 @@ import io
 
 from rich.console import Console
 
-from src.agent import Agent, AgentResponse, Tool
+from src.agent import _NUDGE, Agent, AgentResponse, Tool
 
 
 class _ScriptedLLM:
@@ -26,6 +26,8 @@ class _ScriptedLLM:
         self.calls.append(
             {"messages": list(messages), "tool_names": [t.name for t in tools]}
         )
+        if not self._responses and messages[-1]["content"] == _NUDGE:
+            return _text("")
         if not self._responses:
             raise AssertionError("scripted LLM ran out of responses")
         return self._responses.pop(0)
@@ -74,7 +76,7 @@ def test_agent_loops_on_tool_use_until_text_response():
     llm = _ScriptedLLM(
         [
             _tool_call("call-1", "answer", {}),
-            _text("the answer is 42"),
+            _text("the answer is 42 — anything else?"),
         ]
     )
     agent, buf = _make_agent(llm, tools=[tool])
@@ -390,3 +392,86 @@ def test_indicator_falls_back_to_ascii_on_a_non_utf8_console():
         agent._progress.refresh()
 
     stream.flush()
+
+
+# --- stalled turns -----------------------------------------------------
+# Live session 2026-10-25: after read_draft the model wrote "I'll now
+# finish the cover and render the PDF." and stopped, so the REPL sat at
+# its prompt while the user waited for work that never started.
+
+
+def test_agent_nudges_once_when_it_stops_after_tools_without_asking():
+    llm = _ScriptedLLM(
+        [
+            _tool_call("t1", "read_draft", {}),
+            _text("Now I'll render the PDF."),
+            _tool_call("t2", "render_book", {}),
+            _text("Done. Which pages have issues?"),
+        ]
+    )
+    calls = []
+    tools = [
+        Tool(name=n, description="", input_schema={"type": "object"},
+             handler=lambda _i, n=n: calls.append(n) or "ok")
+        for n in ("read_draft", "render_book")
+    ]
+    agent, _ = _make_agent(llm, tools)
+
+    agent.say("go")
+
+    assert calls == ["read_draft", "render_book"]
+    nudge = llm.calls[2]["messages"][-1]
+    assert nudge["role"] == "user"
+    assert "do it now" in nudge["content"]
+
+
+def test_agent_nudges_at_most_once_per_user_message():
+    llm = _ScriptedLLM(
+        [
+            _tool_call("t1", "read_draft", {}),
+            _text("I'll render now."),
+            _text("Rendering soon."),
+        ]
+    )
+    tool = Tool(name="read_draft", description="", input_schema={"type": "object"},
+                handler=lambda _i: "ok")
+    agent, buf = _make_agent(llm, [tool])
+
+    agent.say("go")
+
+    assert "Rendering soon." in buf.getvalue()
+
+
+def test_agent_does_not_nudge_a_question_or_a_tool_free_reply():
+    llm = _ScriptedLLM(
+        [
+            _tool_call("t1", "read_draft", {}),
+            _text("Shall I use this cover prompt?"),
+            _text("Thanks, enjoy the book."),
+        ]
+    )
+    tool = Tool(name="read_draft", description="", input_schema={"type": "object"},
+                handler=lambda _i: "ok")
+    agent, _ = _make_agent(llm, [tool])
+
+    agent.say("go")
+    agent.say("yes, done")
+
+    assert len(llm.calls) == 3
+
+
+def test_an_empty_reply_to_the_nudge_prints_nothing():
+    llm = _ScriptedLLM(
+        [
+            _tool_call("t1", "read_draft", {}),
+            _text("All set."),
+            _text(""),
+        ]
+    )
+    tool = Tool(name="read_draft", description="", input_schema={"type": "object"},
+                handler=lambda _i: "ok")
+    agent, buf = _make_agent(llm, [tool])
+
+    agent.say("go")
+
+    assert buf.getvalue().strip() == "All set."
