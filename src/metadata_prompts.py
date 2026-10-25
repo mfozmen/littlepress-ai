@@ -353,8 +353,6 @@ def _confirm_suggested_title(
 
 _TITLE_MAX_WORDS = 6
 _TITLE_MAX_CHARS = 40
-_EDGE_SYMBOLS = re.compile(r"^\W+|\W+$")
-_TRAILING_VOLUME = re.compile(r"(.*?\w)[\s\-–—]*(\d+)")
 
 
 def suggest_title(draft: Draft) -> tuple[str, int | None] | None:
@@ -369,16 +367,17 @@ def suggest_title(draft: Draft) -> tuple[str, int | None] | None:
     lines = [line.strip() for line in page.text.splitlines() if line.strip()]
     if len(lines) < 2:
         return None
-    line = _EDGE_SYMBOLS.sub("", lines[0])
+    alnum = [i for i, ch in enumerate(lines[0]) if ch.isalnum()]
+    line = lines[0][alnum[0] : alnum[-1] + 1] if alnum else ""
+    words = line.split()
     if (
         not any(ch.isalpha() for ch in line)
         or len(line) > _TITLE_MAX_CHARS
-        or len(line.split()) > _TITLE_MAX_WORDS
+        or len(words) > _TITLE_MAX_WORDS
     ):
         return None
-    match = _TRAILING_VOLUME.fullmatch(line)
-    if match:
-        return match.group(1), int(match.group(2))
+    if len(words) > 1 and words[-1].isdecimal():
+        return " ".join(words[:-1]).rstrip(" -–—"), int(words[-1])
     return line, None
 
 
