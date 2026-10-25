@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v1.25.2 (2026-10-25)
+
+### Bug Fixes
+
+- Close the viewer locking the PDF before falling back to a new name
+  ([#100](https://github.com/mfozmen/littlepress-ai/pull/100),
+  [`be2081e`](https://github.com/mfozmen/littlepress-ai/commit/be2081ed539fca779103a9befe2c1733a4210b5e))
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.25.1 (2026-10-25)
 
 ### Bug Fixes
@@ -21,6 +32,11 @@ Found in a live session with a draft whose pages each lay a flat grey "paper" JP
   file, since each ingest writes a single extension.
 
 Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.25.1 [skip ci]
+  ([`bf96c82`](https://github.com/mfozmen/littlepress-ai/commit/bf96c82e1caeaf0dd16034a3b4056b37177acb10))
 
 
 ## v1.25.0 (2026-10-25)
