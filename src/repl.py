@@ -147,9 +147,12 @@ _GREETING_OPENING = (
     "turn.\n\n"
 )
 
+_LANGUAGE_NAMES = {"en": "English", "tr": "Turkish"}
+
 _GREETING_AI_COVER_BRANCH = (
     "AI COVER BRANCH (the user picked 'generate with AI' at the "
-    "cover prompt). Draft a one-line cover-illustration prompt in "
+    "cover prompt). The user already chose an AI cover — do not ask "
+    "again whether to use a page drawing instead. Draft a one-line cover-illustration prompt in "
     "your own words from the story's themes — do NOT quote or "
     "paraphrase the child's page text into the image prompt. Show "
     "the prompt to the user for approval, then call "
@@ -263,6 +266,7 @@ _KNOWN_BACK_COVER_CHOICES = frozenset(
 def _build_agent_greeting(
     cover_choice: str | None = None,
     back_cover_choice: str | None = None,
+    lang: str = "en",
 ) -> str:
     """Build the agent's first-turn greeting from the REPL's metadata
     choices.
@@ -312,7 +316,13 @@ def _build_agent_greeting(
             f"Unknown back_cover_choice {back_cover_choice!r}. Valid: "
             f"{sorted(_KNOWN_BACK_COVER_CHOICES)} or None."
         )
-    parts = [_GREETING_OPENING]
+    name = _LANGUAGE_NAMES.get(lang, "English")
+    parts = [
+        f"LANGUAGE: the user answered the setup questions in {name}. "
+        f"Write every reply to them in {name}; switch only if they start "
+        "writing in another language.\n\n",
+        _GREETING_OPENING,
+    ]
     if cover_choice == _AI_COVER_TAG:
         parts.append(_GREETING_AI_COVER_BRANCH)
     elif cover_choice in _DETERMINISTIC_COVER_STATE:
@@ -493,6 +503,7 @@ class Repl:
         greeting = _build_agent_greeting(
             cover_choice=choices.cover,
             back_cover_choice=choices.back_cover,
+            lang=choices.lang,
         )
         try:
             self._agent.say(greeting)
@@ -1631,6 +1642,7 @@ def _cmd_load(repl: Repl, args: str) -> None:
     greeting = _build_agent_greeting(
         cover_choice=choices.cover,
         back_cover_choice=choices.back_cover,
+        lang=choices.lang,
     )
     try:
         repl._agent.say(greeting)

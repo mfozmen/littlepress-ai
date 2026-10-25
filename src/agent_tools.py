@@ -1276,6 +1276,12 @@ def _apply_image_cover(draft, style, page_n_raw) -> str:
 # Quality tiers every image provider accepts. Per-tier prices live on
 # the provider (``ImageProvider.COST_USD``) so the confirm prompt quotes
 # the provider that will actually bill the user.
+# The user approved (and may have been billed for) this call, so a
+# failure must reach them instead of the agent carrying on silently.
+_MSG_TELL_USER_IT_FAILED = (
+    "Tell the user it failed and why before doing anything else, and "
+    "ask how to continue; do not render as if the image was made."
+)
 _IMAGE_QUALITIES = ("high", "low", "medium")
 # A5 covers are ≈ 2:3 portrait. 1024x1536 is the closest portrait size
 # every image provider supports, and it's what the renderer letterboxes cleanly
@@ -1327,7 +1333,7 @@ def generate_cover_illustration_tool(
                 quality=quality,
             )
         except ImageGenerationError as e:
-            return f"Cover generation failed: {e}"
+            return f"Cover generation failed: {e}. {_MSG_TELL_USER_IT_FAILED}"
         return _apply_generated_cover(draft, output_path, style)
 
     return Tool(
@@ -1501,7 +1507,10 @@ def generate_page_illustration_tool(
                 quality=quality,
             )
         except ImageGenerationError as e:
-            return f"Page {page_n} illustration generation failed: {e}"
+            return (
+                f"Page {page_n} illustration generation failed: {e}. "
+                f"{_MSG_TELL_USER_IT_FAILED}"
+            )
 
         page.image = output_path
         if layout is not None:

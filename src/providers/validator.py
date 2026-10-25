@@ -201,7 +201,8 @@ def _check_openai(spec: ProviderSpec, api_key: str) -> None:
         )
         client.chat.completions.create(
             model=spec.validation_model or _OPENAI_DEFAULT_VALIDATION_MODEL,
-            max_tokens=1,
+            # GPT-5 models reject max_tokens and need >1 token to finish.
+            max_completion_tokens=16,
             messages=[{"role": "user", "content": "ping"}],
         )
     except (auth_error, perm_error) as e:
@@ -210,7 +211,7 @@ def _check_openai(spec: ProviderSpec, api_key: str) -> None:
         raise TransientValidationError(f"OpenAI call failed: {e}") from e
 
 
-_OPENAI_DEFAULT_VALIDATION_MODEL = "gpt-4o-mini"
+_OPENAI_DEFAULT_VALIDATION_MODEL = "gpt-5.4-mini"
 
 
 def _check_ollama(_spec: ProviderSpec, _api_key: str) -> None:

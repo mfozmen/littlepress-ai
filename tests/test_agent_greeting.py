@@ -454,3 +454,18 @@ def test_greeting_tells_agent_the_draft_is_already_processed():
         or "pre-processed" in g
         or "already been" in g
     )
+
+
+def test_greeting_tells_the_agent_which_language_to_reply_in():
+    """The metadata questions were Turkish but the agent replied in
+    English: nothing told it the user's language."""
+    assert "Turkish" in _build_agent_greeting(lang="tr")
+    assert "English" in _build_agent_greeting(lang="en")
+
+
+def test_ai_cover_branch_says_the_choice_is_already_made():
+    """The agent re-asked "page drawing or AI?" after the user had
+    already picked AI at the cover prompt."""
+    g = _build_agent_greeting(cover_choice="ai").lower()
+
+    assert "already chose" in g

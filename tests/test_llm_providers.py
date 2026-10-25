@@ -1569,3 +1569,12 @@ def test_openai_provider_chat_returns_empty_string_without_choices(monkeypatch):
     monkeypatch.setattr(llm_mod, "_import_openai", lambda: module)
 
     assert OpenAIProvider(api_key="sk-test").chat([{"role": "user", "content": "hi"}]) == ""
+
+
+def test_openai_default_chat_model_is_current_and_matches_validation():
+    """gpt-4o-mini ignored the greeting's instructions in a live
+    session (re-asked an answered question, replied in English)."""
+    from src.providers import llm
+
+    assert llm._OPENAI_CHAT_MODEL != "gpt-4o-mini"
+    assert llm.find("openai").validation_model == llm._OPENAI_CHAT_MODEL

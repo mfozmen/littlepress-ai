@@ -55,13 +55,11 @@ class ImageProvider(Protocol):
     ) -> Path: ...
 
 
-# ``gpt-image-2`` at ``quality="high"`` legitimately takes 30-90 s, so
-# we can't use the tight REPL-picker ping timeout. But the SDK default
-# (~600 s) would hang the REPL forever on a network drop. 120 s is the
-# compromise: long enough for a slow high-quality render, short enough
-# that a dead connection reaches the user while they're still at the
-# prompt.
-_GENERATION_TIMEOUT_SECONDS = 120.0
+# A high-quality portrait can take minutes, so the tight REPL-picker
+# ping timeout won't do, but the SDK default (~600 s) would hang on a
+# network drop. 300 s is the compromise; the agent's live progress
+# indicator shows the user it is still working meanwhile.
+_GENERATION_TIMEOUT_SECONDS = 300.0
 
 
 class OpenAIImageProvider:
