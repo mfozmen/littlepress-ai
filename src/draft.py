@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -97,6 +99,140 @@ def slugify(text: str) -> str:
     return (
         "".join(ch for ch in cleaned if ch.isalnum() or ch in "_-").lower() or "book"
     )
+
+
+def output_paths(output_dir: Path, title: str) -> tuple[Path, Path]:
+    """The A5 and A4-booklet paths a render writes for ``title``.
+
+    A PDF open in a Windows viewer is locked, so writing over it fails.
+    Close the viewer window showing it and keep the stable name; only if
+    that doesn't free the file, fall back to the first unlocked
+    ``<slug>-N`` pair.
+    """
+    slug = slugify(title)
+    n = 1
+    while True:
+        stem = slug if n == 1 else f"{slug}-{n}"
+        pair = (
+            (Path(output_dir) / f"{stem}.pdf").resolve(),
+            (Path(output_dir) / f"{stem}_A4_booklet.pdf").resolve(),
+        )
+        locked = [p for p in pair if _is_locked(p)]
+        if not locked:
+            return pair
+        if n == 1 and _close_viewers(locked) and _wait_unlocked(locked):
+            return pair
+        n += 1
+
+
+#: How long to wait for a closed viewer to release the file. A viewer
+#: asking "save changes?" keeps it locked; then the numbered name is used.
+_LOCK_RELEASE_WAIT_SECONDS = 3.0
+_WM_CLOSE = 0x0010
+
+
+def _wait_unlocked(paths: list[Path]) -> bool:
+    deadline = time.monotonic() + _LOCK_RELEASE_WAIT_SECONDS
+    while any(_is_locked(p) for p in paths):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+    return True
+
+
+def _close_viewers(paths: list[Path], user32=None, pids=None) -> bool:
+    """Ask the windows showing ``paths`` to close (same as clicking X).
+
+    Only windows owned by a process that actually holds the lock (per
+    the Windows Restart Manager) and whose title names the file are
+    closed, so a browser tab or an unrelated app with a similar title is
+    never touched. Returns whether any window was asked. Windows only;
+    elsewhere viewers don't lock files.
+    """
+    import ctypes
+
+    if user32 is None:
+        if sys.platform != "win32":
+            return False
+        user32 = ctypes.windll.user32
+    if pids is None:
+        pids = _locking_pids(paths)
+    if not pids:
+        return False
+
+    names = [p.name.lower() for p in paths]
+    hits: list = []
+    enum_proc = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(
+        ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p
+    )
+
+    def visit(hwnd, _lparam):
+        owner = ctypes.c_uint32()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value in pids and user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title, length + 1)
+            if any(name in title.value.lower() for name in names):
+                hits.append(hwnd)
+        return True
+
+    user32.EnumWindows(enum_proc(visit), 0)
+    for hwnd in hits:
+        user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
+    return bool(hits)
+
+
+def _locking_pids(paths: list[Path], rm=None) -> set[int]:
+    """Process ids holding ``paths`` open, via the Windows Restart
+    Manager. Empty on any failure: then nothing gets closed."""
+    import ctypes
+
+    class _UniqueProcess(ctypes.Structure):
+        _fields_ = [
+            ("dwProcessId", ctypes.c_uint32),
+            ("ProcessStartTime", ctypes.c_uint32 * 2),
+        ]
+
+    class _ProcessInfo(ctypes.Structure):  # RM_PROCESS_INFO
+        _fields_ = [
+            ("Process", _UniqueProcess),
+            ("strAppName", ctypes.c_wchar * 256),
+            ("strServiceShortName", ctypes.c_wchar * 64),
+            ("ApplicationType", ctypes.c_int32),
+            ("AppStatus", ctypes.c_uint32),
+            ("TSSessionId", ctypes.c_uint32),
+            ("bRestartable", ctypes.c_int32),
+        ]
+
+    rm = rm or ctypes.windll.rstrtmgr
+    session = ctypes.c_uint32()
+    key = ctypes.create_unicode_buffer(33)
+    if rm.RmStartSession(ctypes.byref(session), 0, key):
+        return set()
+    try:
+        files = (ctypes.c_wchar_p * len(paths))(*(str(p) for p in paths))
+        if rm.RmRegisterResources(session, len(paths), files, 0, None, 0, None):
+            return set()
+        needed, count, reasons = ctypes.c_uint32(), ctypes.c_uint32(16), ctypes.c_uint32()
+        infos = (_ProcessInfo * 16)()
+        if rm.RmGetList(
+            session, ctypes.byref(needed), ctypes.byref(count), infos, ctypes.byref(reasons)
+        ):
+            return set()
+        return {infos[i].Process.dwProcessId for i in range(count.value)}
+    finally:
+        rm.RmEndSession(session)
+
+
+def _is_locked(path: Path) -> bool:
+    try:
+        with open(path, "r+b"):
+            return False
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        return True
 
 
 def collect_input_pdf(source: Path, session_root: Path) -> Path:

@@ -13,6 +13,7 @@ from src.draft import (
     collect_input_pdf,
     from_pdf,
     next_version_number,
+    output_paths,
     slugify,
     strip_page_number,
     to_book,
@@ -407,3 +408,233 @@ def test_from_pdf_drops_the_typed_page_number(tmp_path):
     draft = from_pdf(path, tmp_path / "images")
 
     assert [p.text.strip() for p in draft.pages] == ["Once upon", "they played."]
+
+
+# --- output_paths --------------------------------------------------------
+
+
+def test_output_paths_use_the_title_slug(tmp_path):
+    a5, booklet = output_paths(tmp_path, "Yavru Kedi - 1")
+
+    assert a5 == (tmp_path / "yavru_kedi_-_1.pdf").resolve()
+    assert booklet == (tmp_path / "yavru_kedi_-_1_A4_booklet.pdf").resolve()
+
+
+class _FakeLock:
+    """Makes ``open(locked, "r+b")`` raise PermissionError like a Windows
+    viewer holding the file, until ``release`` is called."""
+
+    def __init__(self, monkeypatch, locked):
+        import builtins
+
+        self.locked = locked.resolve()
+        self.held = True
+        real_open = builtins.open
+
+        def fake_open(file, *args, **kwargs):
+            if self.held and Path(file).resolve() == self.locked:
+                raise PermissionError(13, "in use")
+            return real_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", fake_open)
+
+    def release(self):
+        self.held = False
+
+
+def test_output_paths_close_the_viewer_holding_the_pdf(tmp_path, monkeypatch):
+    """Windows viewers lock the open PDF. Closing the viewer keeps the
+    stable file name instead of piling up numbered copies."""
+    import src.draft as draft_mod
+
+    (tmp_path / "book.pdf").write_bytes(b"%PDF")
+    lock = _FakeLock(monkeypatch, tmp_path / "book.pdf")
+    closed: list = []
+
+    def fake_close(paths):
+        closed.extend(paths)
+        lock.release()
+        return True
+
+    monkeypatch.setattr(draft_mod, "_close_viewers", fake_close)
+
+    a5, _ = output_paths(tmp_path, "Book")
+
+    assert a5 == (tmp_path / "book.pdf").resolve()
+    assert (tmp_path / "book.pdf").resolve() in closed
+
+
+def test_output_paths_fall_back_when_the_viewer_cannot_be_closed(
+    tmp_path, monkeypatch
+):
+    import src.draft as draft_mod
+
+    (tmp_path / "book.pdf").write_bytes(b"%PDF")
+    _FakeLock(monkeypatch, tmp_path / "book.pdf")
+    monkeypatch.setattr(draft_mod, "_close_viewers", lambda _paths: False)
+
+    a5, booklet = output_paths(tmp_path, "Book")
+
+    assert a5 == (tmp_path / "book-2.pdf").resolve()
+    assert booklet == (tmp_path / "book-2_A4_booklet.pdf").resolve()
+
+
+def test_output_paths_fall_back_when_the_lock_outlives_the_close(
+    tmp_path, monkeypatch
+):
+    """A viewer that asks "save changes?" keeps the lock; don't hang."""
+    import src.draft as draft_mod
+
+    (tmp_path / "book.pdf").write_bytes(b"%PDF")
+    _FakeLock(monkeypatch, tmp_path / "book.pdf")
+    monkeypatch.setattr(draft_mod, "_close_viewers", lambda _paths: True)
+    monkeypatch.setattr(draft_mod, "_LOCK_RELEASE_WAIT_SECONDS", 0.05)
+
+    a5, _ = output_paths(tmp_path, "Book")
+
+    assert a5 == (tmp_path / "book-2.pdf").resolve()
+
+
+class _FakeUser32:
+    """Just enough of user32 for ``_close_viewers``: two visible windows
+    and one hidden one, recording WM_CLOSE posts."""
+
+    def __init__(self, titles, pids=None):
+        self.titles = titles  # hwnd -> (title, visible)
+        self.pids = pids or {}  # hwnd -> owning process id
+        self.posted: list = []
+
+    def GetWindowThreadProcessId(self, hwnd, pid_ref):  # noqa: N802
+        pid_ref._obj.value = self.pids.get(hwnd, 0)
+        return 1
+
+    def EnumWindows(self, callback, _lparam):  # noqa: N802 — Win32 name
+        for hwnd in self.titles:
+            callback(hwnd, 0)
+        return True
+
+    def IsWindowVisible(self, hwnd):  # noqa: N802
+        return self.titles[hwnd][1]
+
+    def GetWindowTextLengthW(self, hwnd):  # noqa: N802
+        return len(self.titles[hwnd][0])
+
+    def GetWindowTextW(self, hwnd, buf, size):  # noqa: N802
+        buf.value = self.titles[hwnd][0][: size - 1]
+        return len(buf.value)
+
+    def PostMessageW(self, hwnd, msg, _w, _l):  # noqa: N802
+        self.posted.append((hwnd, msg))
+        return True
+
+
+def test_close_viewers_closes_only_the_locking_process_window_showing_the_pdf(
+    tmp_path,
+):
+    """Only windows of the process that holds the lock AND show the PDF
+    get closed — not a browser tab or another app with a similar title."""
+    from src.draft import _WM_CLOSE, _close_viewers
+
+    user32 = _FakeUser32(
+        {
+            1: ("book.pdf - Adobe Acrobat Reader", True),
+            2: ("Notes.txt - Notepad", True),
+            3: ("book.pdf", False),  # hidden helper window
+            4: ("book.pdf - Microsoft Edge", True),  # not the lock holder
+            5: ("Home - Adobe Acrobat Reader", True),  # holder, other title
+        },
+        pids={1: 100, 2: 100, 3: 100, 4: 200, 5: 100},
+    )
+
+    closed = _close_viewers([tmp_path / "book.pdf"], user32=user32, pids={100})
+
+    assert closed is True
+    assert user32.posted == [(1, _WM_CLOSE)]
+
+
+def test_close_viewers_does_nothing_when_no_process_holds_the_lock(tmp_path):
+    from src.draft import _close_viewers
+
+    user32 = _FakeUser32({1: ("book.pdf - Viewer", True)}, pids={1: 100})
+
+    assert _close_viewers([tmp_path / "book.pdf"], user32=user32, pids=set()) is False
+    assert user32.posted == []
+
+
+def test_close_viewers_reports_when_no_window_shows_the_pdf(tmp_path):
+    from src.draft import _close_viewers
+
+    user32 = _FakeUser32({2: ("Notes.txt - Notepad", True)}, pids={2: 100})
+
+    assert _close_viewers([tmp_path / "book.pdf"], user32=user32, pids={100}) is False
+
+
+def test_close_viewers_is_a_no_op_off_windows(tmp_path, monkeypatch):
+    import src.draft as draft_mod
+
+    monkeypatch.setattr(draft_mod.sys, "platform", "linux")
+
+    assert draft_mod._close_viewers([tmp_path / "book.pdf"]) is False
+
+
+def test_close_viewers_uses_the_real_user32_on_windows(tmp_path, monkeypatch):
+    import ctypes
+    import types
+
+    import src.draft as draft_mod
+
+    user32 = _FakeUser32({1: ("book.pdf - Viewer", True)}, pids={1: 4242})
+    rm = _FakeRestartManager(pids=[4242])
+    monkeypatch.setattr(draft_mod.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ctypes,
+        "windll",
+        types.SimpleNamespace(user32=user32, rstrtmgr=rm),
+        raising=False,
+    )
+
+    assert draft_mod._close_viewers([tmp_path / "book.pdf"]) is True
+    assert user32.posted == [(1, draft_mod._WM_CLOSE)]
+    assert rm.registered == [str(tmp_path / "book.pdf")]
+    assert rm.ended
+
+
+class _FakeRestartManager:
+    """Stand-in for rstrtmgr.dll: reports ``pids`` as lock holders."""
+
+    def __init__(self, pids, fail=None):
+        self.pids = pids
+        self.fail = fail  # name of the call that should return an error
+        self.registered: list = []
+        self.ended = False
+
+    def RmStartSession(self, session_ref, _flags, _key):  # noqa: N802
+        session_ref._obj.value = 7
+        return 5 if self.fail == "start" else 0
+
+    def RmRegisterResources(self, _session, n, files, *_rest):  # noqa: N802
+        self.registered = [files[i] for i in range(n)]
+        return 5 if self.fail == "register" else 0
+
+    def RmGetList(self, _session, needed, count, infos, _reasons):  # noqa: N802
+        if self.fail == "list":
+            return 234  # ERROR_MORE_DATA
+        for i, pid in enumerate(self.pids):
+            infos[i].Process.dwProcessId = pid
+        count._obj.value = len(self.pids)
+        needed._obj.value = len(self.pids)
+        return 0
+
+    def RmEndSession(self, _session):  # noqa: N802
+        self.ended = True
+        return 0
+
+
+@pytest.mark.parametrize("fail", ["start", "register", "list"])
+def test_locking_pids_is_empty_when_restart_manager_fails(tmp_path, fail):
+    from src.draft import _locking_pids
+
+    rm = _FakeRestartManager(pids=[1], fail=fail)
+
+    assert _locking_pids([tmp_path / "book.pdf"], rm=rm) == set()
+    assert rm.ended is (fail != "start")
