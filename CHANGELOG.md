@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v1.26.0 (2026-10-25)
+
+### Features
+
+- Ask which language to use as the first setup question
+  ([#102](https://github.com/mfozmen/littlepress-ai/pull/102),
+  [`da38b4d`](https://github.com/mfozmen/littlepress-ai/commit/da38b4d45437ec3b8d2481f46931e244503e2ebd))
+
+The language was inferred from the system locale and the agent replied in English regardless.
+  collect_metadata now opens with a bilingual "Dil / Language?" menu (Enter keeps the detected
+  default); the choice drives the remaining prompts, the agent greeting's language line, and is
+  written to LITTLEPRESS_LANG so later localised labels follow it.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.25.3 (2026-10-25)
 
 ### Bug Fixes
@@ -21,6 +37,11 @@ Found in a live session:
   to 300 s.
 
 Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.25.3 [skip ci]
+  ([`d0f83dd`](https://github.com/mfozmen/littlepress-ai/commit/d0f83dd3147b057c9d8dde4efdfa9aebd8cdc6f8))
 
 
 ## v1.25.2 (2026-10-25)
