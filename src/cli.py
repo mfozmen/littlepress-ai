@@ -15,6 +15,13 @@ from prompt_toolkit.completion import Completer, Completion
 
 
 def _resolve_version() -> str:
+    from src import update
+
+    # After `littlepress update` the installed metadata is stale; the
+    # checkout's pyproject has the real version.
+    checkout = update.checkout_version()
+    if checkout:
+        return checkout
     try:
         return version("littlepress-ai")
     except PackageNotFoundError:
@@ -60,6 +67,13 @@ class SlashCompleter(Completer):
 
 
 def main(argv: list[str] | None = None) -> int:
+    import sys
+
+    if (argv if argv is not None else sys.argv[1:]) == ["update"]:
+        from src import update
+
+        return update.update()
+
     parser = argparse.ArgumentParser(
         prog="littlepress",
         description="Turn a child's picture-book draft PDF into a print-ready book.",
@@ -73,7 +87,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     import getpass
-    import sys
     from pathlib import Path
 
     from rich.console import Console
