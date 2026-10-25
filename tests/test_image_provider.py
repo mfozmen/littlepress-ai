@@ -430,23 +430,29 @@ def test_google_image_provider_raises_when_no_image_comes_back(
     text_only = types.SimpleNamespace(text="I can't draw that", inline_data=None)
     _install_fake_google_image(monkeypatch, parts=[text_only])
 
+    provider = GoogleImageProvider(api_key="k")
+
     with pytest.raises(ImageGenerationError, match="no image"):
-        GoogleImageProvider(api_key="k").generate("a fox", tmp_path / "c.png")
+        provider.generate("a fox", tmp_path / "c.png")
 
 
 def test_google_image_provider_wraps_sdk_errors(tmp_path, monkeypatch):
     _install_fake_google_image(monkeypatch, raises=RuntimeError("quota"))
 
+    provider = GoogleImageProvider(api_key="k")
+
     with pytest.raises(ImageGenerationError, match="quota"):
-        GoogleImageProvider(api_key="k").generate("a fox", tmp_path / "c.png")
+        provider.generate("a fox", tmp_path / "c.png")
 
 
 def test_google_image_provider_reports_a_missing_sdk(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "google", None)
     monkeypatch.setitem(sys.modules, "google.genai", None)
 
+    provider = GoogleImageProvider(api_key="k")
+
     with pytest.raises(ImageGenerationError, match="google-genai"):
-        GoogleImageProvider(api_key="k").generate("a fox", tmp_path / "c.png")
+        provider.generate("a fox", tmp_path / "c.png")
 
 
 def test_google_image_provider_rejects_unreadable_image_bytes(
@@ -455,6 +461,8 @@ def test_google_image_provider_rejects_unreadable_image_bytes(
     _install_fake_google_image(monkeypatch, parts=[_image_part(b"not-an-image")])
     out = tmp_path / "c.png"
 
+    provider = GoogleImageProvider(api_key="k")
+
     with pytest.raises(ImageGenerationError, match="unreadable"):
-        GoogleImageProvider(api_key="k").generate("a fox", out)
+        provider.generate("a fox", out)
     assert not out.exists()
