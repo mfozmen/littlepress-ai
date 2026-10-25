@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v1.29.0 (2026-10-25)
+
+### Features
+
+- Drive setup, rendering and the review prompt from code
+  ([#107](https://github.com/mfozmen/littlepress-ai/pull/107),
+  [`e3160e8`](https://github.com/mfozmen/littlepress-ai/commit/e3160e85526f2e9e12aee29c27d737485a35707d))
+
+The agent's first turn used to carry the AI cover/blurb branches, the render and the review question
+  as instructions, and a live model said "I'll render the PDF now" and stopped. src/setup_flow.py
+  now runs those steps: the LLM only drafts the cover description and blurb (one chat call
+
+each), the user keeps, replaces or skips them, the cost-confirmed cover tool and the renderer are
+  called directly, and the review question is printed by the app. The agent only handles free-form
+  review corrections, receiving a short review context with the first reply; the REPL re-renders
+  after any draft change and closes the review on done/tamam. render_book is no longer an agent
+  tool.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.28.1 (2026-10-25)
 
 ### Bug Fixes
@@ -14,6 +35,11 @@ Yavru Kedi 1 skips the number on page 7, so pages 8 and 9 start with "7" and "8"
   as a page number. A page is never stripped down to nothing.
 
 Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Chores
+
+- **release**: 1.28.1 [skip ci]
+  ([`cd464cc`](https://github.com/mfozmen/littlepress-ai/commit/cd464ccddea7108f60e18213c0d3633eb6d970d8))
 
 
 ## v1.28.0 (2026-10-25)
