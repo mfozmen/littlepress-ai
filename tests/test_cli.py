@@ -17,7 +17,14 @@ def test_resolve_version_falls_back_when_not_installed(monkeypatch):
         raise PackageNotFoundError
 
     monkeypatch.setattr(cli, "version", boom)
+    monkeypatch.setattr("src.update.checkout_version", lambda: None)
     assert cli._resolve_version() == "0.0.0+dev"
+
+
+def test_resolve_version_uses_metadata_outside_a_checkout(monkeypatch):
+    monkeypatch.setattr(cli, "version", lambda _name: "4.5.6")
+    monkeypatch.setattr("src.update.checkout_version", lambda: None)
+    assert cli._resolve_version() == "4.5.6"
 
 
 def test_cli_version_exits_zero_and_prints_version(capsys):
