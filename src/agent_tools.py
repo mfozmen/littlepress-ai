@@ -1274,17 +1274,12 @@ def _apply_image_cover(draft, style, page_n_raw) -> str:
     return msg + "."
 
 
-# OpenAI ``gpt-image-1`` pricing (portrait 1024x1536, USD).
-# APPROXIMATE — last spot-checked against openai.com/api/pricing/ in
-# 2026-Q2. OpenAI quotes per-quality rates for square 1024x1024 and
-# portraits scale ~1.5x. Treat these numbers as advisory; the actual
-# bill lives on the user's OpenAI account. When a user reports a
-# visible drift, re-check the pricing page and update here — both
-# ``generate_cover_illustration`` and ``generate_page_illustration``
-# read from this one constant so the refresh is a single edit.
-_IMAGE_COST_USD = {"low": 0.02, "medium": 0.06, "high": 0.25}
+# Quality tiers every image provider accepts. Per-tier prices live on
+# the provider (``ImageProvider.COST_USD``) so the confirm prompt quotes
+# the provider that will actually bill the user.
+_IMAGE_QUALITIES = ("high", "low", "medium")
 # A5 covers are ≈ 2:3 portrait. 1024x1536 is the closest portrait size
-# gpt-image-1 supports, and it's what the renderer letterboxes cleanly
+# every image provider supports, and it's what the renderer letterboxes cleanly
 # at A5 without wasted whitespace.
 _IMAGE_SIZE_PORTRAIT = "1024x1536"
 
@@ -1316,7 +1311,9 @@ def generate_cover_illustration_tool(
         prompt, quality, style, error = _parse_generate_cover_input(input_)
         if error is not None:
             return error
-        confirm_msg = _build_generate_cover_confirm_prompt(prompt, quality)
+        confirm_msg = _build_generate_cover_confirm_prompt(
+            prompt, quality, image_provider
+        )
         if not confirm(confirm_msg):
             return (
                 "User declined the cover generation. Keep the existing "
@@ -1338,7 +1335,7 @@ def generate_cover_illustration_tool(
         name="generate_cover_illustration",
         description=(
             "Generate a cover illustration from a text prompt using "
-            "OpenAI's gpt-image-1 (requires an OpenAI API key). The user "
+            "the configured AI image provider (OpenAI or Gemini). The user "
             "is shown the prompt and the estimated cost and must confirm "
             "before any API call happens. On approval the image is saved "
             "into the project and set as the book's cover. Use this only "
@@ -1350,7 +1347,7 @@ def generate_cover_illustration_tool(
             "prompt. The cover picture may be generated, but the "
             "wording that produces it must not launder the child's "
             "sentences through the image model. 'quality' trades off "
-            "cost vs detail: low ≈ $0.02, medium ≈ $0.06, high ≈ $0.25. "
+            "cost vs detail; the confirm prompt shows the provider's price. "
             "'style' is optional and picks the cover template; omit it "
             "to leave the current choice alone."
         ),
@@ -1360,7 +1357,7 @@ def generate_cover_illustration_tool(
                 "prompt": {"type": "string"},
                 "quality": {
                     "type": "string",
-                    "enum": sorted(_IMAGE_COST_USD),
+                    "enum": sorted(_IMAGE_QUALITIES),
                 },
                 "style": {
                     "type": "string",
@@ -1387,10 +1384,10 @@ def _parse_generate_cover_input(
             "the cover illustration they want."
         )
     quality = str(input_.get("quality", "medium"))
-    if quality not in _IMAGE_COST_USD:
+    if quality not in _IMAGE_QUALITIES:
         return "", "", None, (
             f"Invalid quality '{quality}'. "
-            f"Valid values: {sorted(_IMAGE_COST_USD)}."
+            f"Valid values: {sorted(_IMAGE_QUALITIES)}."
         )
     style = input_.get("style")
     if style is not None and style not in VALID_COVER_STYLES:
@@ -1401,13 +1398,15 @@ def _parse_generate_cover_input(
     return prompt, quality, style, None
 
 
-def _build_generate_cover_confirm_prompt(prompt: str, quality: str) -> str:
-    cost = _IMAGE_COST_USD[quality]
+def _build_generate_cover_confirm_prompt(
+    prompt: str, quality: str, image_provider: ImageProvider
+) -> str:
+    cost = image_provider.COST_USD[quality]
     return (
-        "Generate a cover illustration with OpenAI gpt-image-1?\n"
+        f"Generate a cover illustration with {image_provider.LABEL}?\n"
         f"  Prompt : {prompt}\n"
         f"  Quality: {quality} (~${cost:.2f})\n"
-        "This will call the OpenAI image API and bill your account."
+        "This will call the image API and bill your account."
     )
 
 
@@ -1483,7 +1482,8 @@ def generate_page_illustration_tool(
             return error
 
         confirm_msg = _build_page_illustration_confirm_prompt(
-            page_n, prompt, quality, layout, existing_image=page.image
+            page_n, prompt, quality, layout, image_provider,
+            existing_image=page.image,
         )
         if not confirm(confirm_msg):
             return (
@@ -1519,22 +1519,21 @@ def generate_page_illustration_tool(
         name="generate_page_illustration",
         description=(
             "Generate an AI illustration for a specific page using "
-            "OpenAI's gpt-image-1 (requires an OpenAI API key). The "
+            "the configured AI image provider (OpenAI or Gemini). The "
             "common case: after ``transcribe_page`` clears a "
             "Samsung-Notes-style source image, the page needs a "
             "fresh drawing; this tool produces one. PRESERVE-CHILD-"
             "VOICE: describe the scene in your OWN words from the "
             "story's themes — do NOT quote or paraphrase the "
             "child's page text into the image prompt. The user is "
-            "shown the prompt and the estimated cost (low ≈ $0.02, "
-            "medium ≈ $0.06, high ≈ $0.25 per 1024x1536 portrait) "
+            "shown the prompt and the provider's estimated cost "
             "and must confirm before any API call happens. On "
             "approval the PNG is saved into the project and set as "
             "the page's ``image``. An optional ``layout`` switches "
             "the page off ``text-only`` (image-top / image-bottom / "
-            "image-full). Registered only on the OpenAI provider — "
-            "on other providers, tell the user to switch via "
-            "/model first."
+            "image-full). Registered only when an image provider is "
+            "set — otherwise tell the user to run /image-model "
+            "openai or /image-model google first."
         ),
         input_schema={
             "type": "object",
@@ -1543,7 +1542,7 @@ def generate_page_illustration_tool(
                 "prompt": {"type": "string"},
                 "quality": {
                     "type": "string",
-                    "enum": sorted(_IMAGE_COST_USD),
+                    "enum": sorted(_IMAGE_QUALITIES),
                 },
                 "layout": {
                     "type": "string",
@@ -1596,10 +1595,10 @@ def _parse_page_illustration_fields(
             "the illustration they want on this page."
         )
     quality = str(input_.get("quality", "medium"))
-    if quality not in _IMAGE_COST_USD:
+    if quality not in _IMAGE_QUALITIES:
         return "", "", None, (
             f"Invalid quality '{quality}'. "
-            f"Valid values: {sorted(_IMAGE_COST_USD)}."
+            f"Valid values: {sorted(_IMAGE_QUALITIES)}."
         )
     layout = input_.get("layout")
     if layout is None:
@@ -1628,10 +1627,11 @@ def _build_page_illustration_confirm_prompt(
     prompt: str,
     quality: str,
     layout: str | None,
+    image_provider: ImageProvider,
     *,
     existing_image,
 ) -> str:
-    cost = _IMAGE_COST_USD[quality]
+    cost = image_provider.COST_USD[quality]
     layout_line = (
         f"  Layout : {layout}\n" if layout is not None else ""
     )
@@ -1649,13 +1649,13 @@ def _build_page_illustration_confirm_prompt(
     else:
         overwrite_line = ""
     return (
-        f"Generate an illustration for page {page_n} with OpenAI "
-        "gpt-image-1?\n"
+        f"Generate an illustration for page {page_n} with "
+        f"{image_provider.LABEL}?\n"
         f"  Prompt : {prompt}\n"
         f"  Quality: {quality} (~${cost:.2f})\n"
         f"{layout_line}"
         f"{overwrite_line}"
-        "This will call the OpenAI image API and bill your account."
+        "This will call the image API and bill your account."
     )
 
 

@@ -71,7 +71,7 @@ Items below came out of the first real end-to-end test (Yavru Dinozor). Listed r
   - **Sub-project 3 — (optional) Review-turn polish.** Possibly route review corrections through slash commands as well so the LLM's NL parsing is an explicit opt-in. Out of scope unless a real user test shows the free-form review is still too loose.
 
 - **Spine-wrap cover template.** Five templates ship now (`full-bleed`, `framed`, `portrait-frame`, `title-band-top`, `poster`). The one remaining idea is `spine-wrap` — drawing spans front + spine + back for the A4 imposed booklet. This needs multi-page cover rendering support that the current `draw_cover` (single page) doesn't have; defer until a real user asks for it.
-- **More image providers for AI cover generation.** First-slice ships OpenAI `gpt-image-1` (see "Shipped" below). Stability / Replicate / a local Stable Diffusion daemon are all plausible follow-ups — plug them in behind the existing `ImageProvider` protocol and add a user-visible way to pick.
+- **More image providers for AI cover generation.** OpenAI `gpt-image-2` and Gemini Nano Banana 2.1 ship today, picked via `/image-model`. Stability / Replicate / a local Stable Diffusion daemon are all plausible follow-ups — plug them in behind the existing `ImageProvider` protocol and add them to `_IMAGE_PROVIDERS` in `src/repl.py`.
 
 ## Explicitly deferred (don't build unless asked)
 

@@ -37,6 +37,9 @@ class _FakeImageProvider:
     registered, not whether the API call succeeded. Other tests in
     ``test_agent_tools.py`` cover the actual generate() path."""
 
+    LABEL = "Fake"
+    COST_USD = {"low": 0.0, "medium": 0.0, "high": 0.0}
+
     def generate(
         self,
         prompt: str,
@@ -638,3 +641,53 @@ def test_image_model_openai_reports_a_build_without_the_openai_provider(
 
     assert "isn't available" in buf.getvalue()
     assert repl._image_provider is None
+
+
+# --- Gemini as image provider ------------------------------------------
+
+
+def test_google_chat_auto_wires_gemini_image_provider(tmp_path):
+    """Gemini chat users get cover / page illustration tools from the
+    same key, like OpenAI chat users do."""
+    from src.providers.image import GoogleImageProvider
+
+    repl = _repl(tmp_path, provider_name="google", api_key="AIza-test")
+
+    assert isinstance(repl._image_provider, GoogleImageProvider)
+    assert "generate_cover_illustration" in _tool_names(repl)
+
+
+def test_image_model_google_prompts_for_key_and_sets_slot(tmp_path):
+    from src.providers.image import GoogleImageProvider
+
+    validate_calls: list[tuple[str, str]] = []
+    repl, _ = _interactive_repl(
+        tmp_path,
+        inputs=["/image-model google", "AIza-image-test", "/exit"],
+        validate=lambda spec, key: validate_calls.append((spec.name, key)),
+    )
+    from src import keyring_store
+
+    repl.run()
+
+    assert isinstance(repl._image_provider, GoogleImageProvider)
+    assert repl._image_provider_label == "google"
+    assert ("google", "AIza-image-test") in validate_calls
+    assert keyring_store.load_key("google") == "AIza-image-test"
+
+
+def test_saved_google_image_provider_restores_from_keyring(tmp_path):
+    from src import keyring_store
+    from src import session as session_mod
+    from src.providers.image import GoogleImageProvider
+
+    session_mod.save(
+        tmp_path, session_mod.Session(provider="anthropic", image_provider="google")
+    )
+    keyring_store.save_key("google", "AIza-saved")
+    repl = _repl(tmp_path, provider_name="anthropic", api_key="sk-ant-test")
+
+    repl._restore_image_provider_from_session()
+
+    assert isinstance(repl._image_provider, GoogleImageProvider)
+    assert repl._image_provider_label == "google"

@@ -721,6 +721,9 @@ class _FakeImageProvider:
     requested output path. Covers the full surface area the tool uses —
     no network, no SDK, no file format validation."""
 
+    LABEL = "Fake Painter 3"
+    COST_USD = {"low": 0.11, "medium": 0.22, "high": 0.33}
+
     def __init__(self, *, raises: Exception | None = None) -> None:
         self.raises = raises
         self.calls: list[dict] = []
@@ -795,6 +798,10 @@ def test_generate_cover_illustration_asks_for_confirmation_with_price(
 
     assert seen_prompts, "confirm() must be called before generating"
     assert "$" in seen_prompts[0]
+    # Name and price come from the active provider, not a hard-coded
+    # OpenAI table — a Gemini user must not be quoted OpenAI prices.
+    assert "Fake Painter 3" in seen_prompts[0]
+    assert "$0.33" in seen_prompts[0]
     assert "high" in seen_prompts[0].lower()
     # The prompt itself must surface — user approves both the cost and
     # the wording that will be sent to the image API.
@@ -1250,6 +1257,8 @@ def test_generate_page_illustration_asks_confirmation_with_price_and_page(
 
     assert seen, "confirm gate must run before the provider is called"
     prompt = seen[0]
+    assert "Fake Painter 3" in prompt
+    assert "$0.33" in prompt
     # Cost cue + quality + which page.
     assert "$" in prompt
     assert "high" in prompt.lower()

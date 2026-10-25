@@ -47,8 +47,10 @@ dependencies = [
   # no-credit-card on-ramp for new users; an optional extra would
   # keep that barrier in place. Floor at 1.0 so ``FunctionResponse.id``
   # and the stabilised ``HttpOptions`` / ``GenerateContentConfig``
-  # shapes the provider relies on are guaranteed to be present.
-  "google-genai>=1.0.0",
+  # shapes the provider relies on are guaranteed to be present, plus
+  # ``ImageConfig(image_size=...)`` and ``Part.thought_signature`` for
+  # Nano Banana image output and Gemini 3 tool calls.
+  "google-genai>=1.73.0",
   # OpenAI provider. Bundled for the same reason as Anthropic — many
   # users already have a GPT key and expect it to Just Work without
   # chasing an optional extra. Floor at 1.50 so the exception

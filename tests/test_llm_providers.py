@@ -339,11 +339,16 @@ def _install_fake_google_genai(
 
     class Part:
         def __init__(
-            self, text=None, function_call=None, function_response=None
+            self,
+            text=None,
+            function_call=None,
+            function_response=None,
+            thought_signature=None,
         ):
             self.text = text
             self.function_call = function_call
             self.function_response = function_response
+            self.thought_signature = thought_signature
 
         @classmethod
         def from_text(cls, text):
@@ -711,6 +716,46 @@ def test_google_provider_turn_preserves_id_for_parallel_same_name_tool_calls(mon
     assert ids == ["toolu_A", "toolu_B"]
     # Contents match the tool outputs one-to-one.
     assert [p.function_response.response["result"] for p in fr_parts] == ["A", "B"]
+
+
+def test_google_provider_round_trips_thought_signature_on_function_calls(
+    monkeypatch,
+):
+    """Gemini 3 models reject a follow-up turn whose function_call parts
+    lack the ``thought_signature`` they were returned with (HTTP 400).
+    The signature must survive the Anthropic-block round trip."""
+    _, types_mod = _install_fake_google_genai(monkeypatch)
+    call_part = types_mod.Part(
+        function_call=types_mod.FunctionCall(name="read_draft", id="c1"),
+        thought_signature=b"sig-bytes",
+    )
+    genai_mod, types_mod = _install_fake_google_genai(
+        monkeypatch, response_parts=[call_part]
+    )
+
+    first = GoogleProvider(api_key="k").turn(
+        [{"role": "user", "content": "go"}], tools=[]
+    )
+    GoogleProvider(api_key="k").turn(
+        [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": first.content},
+        ],
+        tools=[],
+    )
+
+    sent = genai_mod.Client.last_client.models.last_kwargs["contents"]
+    assert sent[1].parts[0].thought_signature == b"sig-bytes"
+
+
+def test_google_default_models_avoid_the_gemini_2_5_family():
+    """Google limits 2.5 models to accounts that already used them, so a
+    freshly created API key fails both the validation ping and chat."""
+    from src.providers import llm, validator
+
+    assert not llm._GOOGLE_CHAT_MODEL.startswith("gemini-2.5")
+    assert not llm.find("google").validation_model.startswith("gemini-2.5")
+    assert not validator._GOOGLE_DEFAULT_VALIDATION_MODEL.startswith("gemini-2.5")
 
 
 def test_google_provider_turn_handles_empty_response(monkeypatch):

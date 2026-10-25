@@ -15,18 +15,24 @@ The contract every provider implements:
   ``ImageGenerationError`` — the tool layer reports a clean message
   to the user rather than guessing at retry semantics.
 
-The only concrete provider today is ``OpenAIImageProvider`` (model
-``gpt-image-1``). The SDK import is lazy so a user on an Ollama-only
-path doesn't need it installed.
+Concrete providers: ``OpenAIImageProvider`` (``gpt-image-2``) and
+``GoogleImageProvider`` (Gemini "Nano Banana"). Each also carries a
+``LABEL`` and an approximate per-quality ``COST_USD`` table that the
+cost-confirm prompt shows. SDK imports are lazy so a user on an
+Ollama-only path doesn't need them installed.
 """
 
 from __future__ import annotations
 
 import base64
+import io
+import math
 import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from PIL import Image
 
 
 class ImageGenerationError(Exception):
@@ -37,6 +43,9 @@ class ImageGenerationError(Exception):
 
 @runtime_checkable
 class ImageProvider(Protocol):
+    LABEL: str
+    COST_USD: dict[str, float]
+
     def generate(
         self,
         prompt: str,
@@ -46,7 +55,7 @@ class ImageProvider(Protocol):
     ) -> Path: ...
 
 
-# ``gpt-image-1`` at ``quality="high"`` legitimately takes 30-90 s, so
+# ``gpt-image-2`` at ``quality="high"`` legitimately takes 30-90 s, so
 # we can't use the tight REPL-picker ping timeout. But the SDK default
 # (~600 s) would hang the REPL forever on a network drop. 120 s is the
 # compromise: long enough for a slow high-quality render, short enough
@@ -56,7 +65,7 @@ _GENERATION_TIMEOUT_SECONDS = 120.0
 
 
 class OpenAIImageProvider:
-    """OpenAI ``gpt-image-1`` adapter.
+    """OpenAI ``gpt-image-2`` adapter.
 
     Uses the same API key the LLM provider uses — we assume the user
     has one OpenAI credential, not two. Responses come back as
@@ -65,7 +74,11 @@ class OpenAIImageProvider:
     truncated file the renderer would later choke on.
     """
 
-    MODEL = "gpt-image-1"
+    # gpt-image-1 was retired: the API now answers "model does not exist".
+    MODEL = "gpt-image-2"
+    LABEL = "OpenAI gpt-image-2"
+    # APPROXIMATE portrait 1024x1536 USD, checked 2026-10. Advisory only.
+    COST_USD = {"low": 0.01, "medium": 0.05, "high": 0.17}
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -132,6 +145,91 @@ class OpenAIImageProvider:
 
         _atomic_write_bytes(output_path, png_bytes)
         return output_path
+
+
+class GoogleImageProvider:
+    """Gemini image-generation ("Nano Banana") adapter.
+
+    Uses the same key as the Gemini chat provider. Gemini picks its own
+    pixel size, so ``size`` only sets the aspect ratio and ``quality``
+    picks the resolution tier. The reply may be JPEG; it is re-encoded
+    to PNG so callers get the same file type from every provider.
+    """
+
+    MODEL = "gemini-nano-banana-2.1"
+    LABEL = "Google Gemini (Nano Banana 2.1)"
+    _IMAGE_SIZE = {"low": "1K", "medium": "2K", "high": "4K"}
+    # APPROXIMATE per-image USD by tier, checked 2026-10. Advisory only.
+    COST_USD = {"low": 0.04, "medium": 0.05, "high": 0.12}
+
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+
+    def generate(
+        self,
+        prompt: str,
+        output_path: Path,
+        size: str = "1024x1536",
+        quality: str = "medium",
+    ) -> Path:
+        try:
+            from google import genai  # type: ignore[import-not-found]
+            from google.genai import types as gtypes  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise ImageGenerationError(
+                "The 'google-genai' SDK is missing from this install. Try: "
+                "pip install --force-reinstall littlepress-ai"
+            ) from e
+
+        width, height = (int(n) for n in size.split("x"))
+        divisor = math.gcd(width, height)
+        try:
+            client = genai.Client(
+                api_key=self._api_key,
+                http_options=gtypes.HttpOptions(
+                    timeout=int(_GENERATION_TIMEOUT_SECONDS * 1000)
+                ),
+            )
+            response = client.models.generate_content(
+                model=self.MODEL,
+                contents=prompt,
+                config=gtypes.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    image_config=gtypes.ImageConfig(
+                        aspect_ratio=f"{width // divisor}:{height // divisor}",
+                        image_size=self._IMAGE_SIZE.get(quality, "2K"),
+                    ),
+                ),
+            )
+        except Exception as e:  # noqa: BLE001 — SDK error classes vary by version
+            raise ImageGenerationError(f"Gemini image generation failed: {e}") from e
+
+        data = _first_inline_image(response)
+        if data is None:
+            raise ImageGenerationError(
+                "Gemini returned no image — often means the prompt hit a "
+                "safety filter. Rephrase and try again."
+            )
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+        except OSError as e:
+            raise ImageGenerationError(
+                f"Gemini returned unreadable image data: {e}"
+            ) from e
+        _atomic_write_bytes(output_path, buf.getvalue())
+        return output_path
+
+
+def _first_inline_image(response) -> bytes | None:
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            blob = getattr(part, "inline_data", None)
+            if blob is not None and getattr(blob, "data", None):
+                return blob.data
+    return None
 
 
 def _atomic_write_bytes(output_path: Path, data: bytes) -> None:

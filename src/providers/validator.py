@@ -171,7 +171,7 @@ def _is_google_auth_error(exc: Exception, client_error_cls) -> bool:
     )
 
 
-_GOOGLE_DEFAULT_VALIDATION_MODEL = "gemini-2.5-flash"
+_GOOGLE_DEFAULT_VALIDATION_MODEL = "gemini-3.8-flash"
 
 
 def _check_openai(spec: ProviderSpec, api_key: str) -> None:

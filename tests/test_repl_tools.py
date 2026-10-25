@@ -104,16 +104,19 @@ def test_generate_page_illustration_registered_when_openai_key_present(
     assert "generate_page_illustration" in _tool_names(repl)
 
 
-def test_generate_page_illustration_omitted_on_non_openai(tmp_path):
+def test_generate_page_illustration_omitted_without_an_image_capable_chat(
+    tmp_path,
+):
+    """Gemini chat auto-wires its own image provider; Claude and
+    Ollama keys can't generate images, so the tool stays off."""
     for name, key in (
         ("anthropic", "sk-ant-test"),
-        ("google", "AIzaSy-test"),
         ("ollama", None),
     ):
         repl = _repl(tmp_path, provider_name=name, api_key=key)
         assert "generate_page_illustration" not in _tool_names(repl), (
-            f"Page illustration tool must not be on {name} — it "
-            "calls the OpenAI image API."
+            f"Page illustration tool must not be on {name} — its key "
+            "can't call an image API."
         )
 
 

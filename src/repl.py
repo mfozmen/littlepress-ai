@@ -37,7 +37,11 @@ from src.agent_tools import (
     transcribe_page_tool,
 )
 from src.draft import Draft
-from src.providers.image import ImageProvider, OpenAIImageProvider
+from src.providers.image import (
+    GoogleImageProvider,
+    ImageProvider,
+    OpenAIImageProvider,
+)
 from src.providers.llm import (
     PICKER_SPECS,
     SPECS,
@@ -147,14 +151,13 @@ _GREETING_AI_COVER_BRANCH = (
     "cover prompt). Draft a one-line cover-illustration prompt in "
     "your own words from the story's themes — do NOT quote or "
     "paraphrase the child's page text into the image prompt. Show "
-    "the prompt + price tier (low ≈ $0.02, medium ≈ $0.06, high ≈ "
-    "$0.25 on OpenAI gpt-image-1 portrait) to the user for "
-    "approval, then call ``generate_cover_illustration`` — the "
-    "tool's built-in cost confirm is the only surviving gate and "
-    "it is about money, not content. If the user is on a non-"
-    "OpenAI provider, tell them to switch via /model and warn "
-    "that they'll be prompted for an OpenAI API key on first "
-    "switch if one isn't already stored in the OS keychain.\n\n"
+    "the prompt to the user for approval, then call "
+    "``generate_cover_illustration`` — the tool's built-in cost "
+    "confirm shows the provider's price and is the only surviving "
+    "gate; it is about money, not content. If that tool isn't "
+    "available, tell the user to run /image-model openai or "
+    "/image-model google (they'll be asked for that provider's API "
+    "key if one isn't already stored in the OS keychain).\n\n"
 )
 
 _GREETING_AI_BACK_COVER_BRANCH = (
@@ -598,10 +601,12 @@ class Repl:
             return
         if (
             self._provider is not None
-            and self._provider.name == "openai"
+            and self._provider.name in _IMAGE_PROVIDERS
             and self._api_key
         ):
-            self._image_provider = OpenAIImageProvider(api_key=self._api_key)
+            self._image_provider = _IMAGE_PROVIDERS[self._provider.name](
+                api_key=self._api_key
+            )
         else:
             self._image_provider = None
 
@@ -738,12 +743,12 @@ class Repl:
             # skipped at startup. The slot itself stays empty.
             self._image_provider_label = "none"
             return
-        if saved == "openai":
-            key = keyring_store.load_key("openai")
+        if saved in _IMAGE_PROVIDERS:
+            key = keyring_store.load_key(saved)
             if not key:
                 return
-            self._image_provider = OpenAIImageProvider(api_key=key)
-            self._image_provider_label = "openai"
+            self._image_provider = _IMAGE_PROVIDERS[saved](api_key=key)
+            self._image_provider_label = saved
         # Future image-provider names fall through here.
 
     def _resume_or_pick(self) -> tuple[ProviderSpec, str | None] | None:
@@ -1160,6 +1165,14 @@ def _cmd_print(repl: Repl, _args: str) -> None:
     return None
 
 
+# Chat providers whose API key can also generate images, keyed by the
+# provider name used in session.json, the keyring and ``/image-model``.
+_IMAGE_PROVIDERS: dict[str, type] = {
+    "openai": OpenAIImageProvider,
+    "google": GoogleImageProvider,
+}
+
+
 def _cmd_image_model(repl: Repl, args: str) -> None:
     """Set or clear the decoupled image-generation provider.
 
@@ -1168,6 +1181,7 @@ def _cmd_image_model(repl: Repl, args: str) -> None:
       ``/image-model openai``  — prompt for an OpenAI key, validate,
                                  use OpenAI for image generation
                                  (chat provider stays as-is)
+      ``/image-model google``  — same, with a Gemini key
       ``/image-model none``    — clear the image provider
 
     The image-provider slot is independent of the chat provider:
@@ -1183,12 +1197,13 @@ def _cmd_image_model(repl: Repl, args: str) -> None:
     if arg in ("none", "off", "clear"):
         _clear_image_model(repl)
         return None
-    if arg == "openai":
-        _set_image_model_openai(repl)
+    if arg in _IMAGE_PROVIDERS:
+        _set_image_model(repl, arg)
         return None
     repl._console.print(
         f"[red]Unknown image provider:[/red] {arg!r}. "
-        "Try [cyan]/image-model openai[/cyan] or "
+        "Try [cyan]/image-model openai[/cyan], "
+        "[cyan]/image-model google[/cyan] or "
         "[cyan]/image-model none[/cyan]."
     )
     return None
@@ -1208,9 +1223,9 @@ def _print_image_model_status(repl: Repl) -> None:
             f"Image provider: [green]{label}[/green] (explicit)."
         )
     elif repl._image_provider is not None:
-        # Auto-wired from a chat=OpenAI session.
+        # Auto-wired from a chat=OpenAI / chat=Gemini session.
         c.print(
-            "Image provider: [green]openai[/green] "
+            f"Image provider: [green]{repl._provider.name}[/green] "
             "(auto-derived from the chat key)."
         )
     else:
@@ -1220,6 +1235,10 @@ def _print_image_model_status(repl: Repl) -> None:
         )
     c.print(
         "  [cyan]/image-model openai[/cyan]  — set OpenAI as the image "
+        "provider (separate API key)."
+    )
+    c.print(
+        "  [cyan]/image-model google[/cyan]  — set Gemini as the image "
         "provider (separate API key)."
     )
     c.print(
@@ -1245,11 +1264,11 @@ def _clear_image_model(repl: Repl) -> None:
         repl._console.print("[dim]No image provider was set.[/dim]")
 
 
-def _set_image_model_openai(repl: Repl) -> None:
-    spec = find("openai")
+def _set_image_model(repl: Repl, name: str) -> None:
+    spec = find(name)
     if spec is None:
         repl._console.print(
-            "[red]OpenAI provider isn't available in this build.[/red]"
+            f"[red]{name} provider isn't available in this build.[/red]"
         )
         return
     repl._show_key_guidance(spec)
@@ -1259,13 +1278,13 @@ def _set_image_model_openai(repl: Repl) -> None:
             "[yellow]Image-provider setup aborted — no key entered.[/yellow]"
         )
         return
-    repl._image_provider = OpenAIImageProvider(api_key=api_key)
-    repl._image_provider_label = "openai"
+    repl._image_provider = _IMAGE_PROVIDERS[name](api_key=api_key)
+    repl._image_provider_label = name
     repl._agent = repl._build_agent()
-    keyring_store.save_key("openai", api_key)
+    keyring_store.save_key(name, api_key)
     repl._persist()
     repl._console.print(
-        "[green]Image provider set to OpenAI.[/green] "
+        f"[green]Image provider set to {spec.display_name}.[/green] "
         "Cover and page illustration tools are now available."
     )
 
