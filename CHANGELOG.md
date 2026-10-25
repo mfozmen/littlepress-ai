@@ -1,7 +1,28 @@
 # CHANGELOG
 
 
+## v1.27.1 (2026-10-25)
+
+### Bug Fixes
+
+- **agent**: Keep going when the model announces work and stops
+  ([#104](https://github.com/mfozmen/littlepress-ai/pull/104),
+  [`e874c66`](https://github.com/mfozmen/littlepress-ai/commit/e874c6623d51946c7efa1d2e386e6db98615ace3))
+
+A live session ended its first turn with "I'll now finish the cover and render the PDF" and no tool
+  call, so the REPL sat at its prompt while the user waited. The greeting now forbids announcing
+  without doing, and the agent nudges the model once per user message when a reply that followed
+  tool calls ends without a tool call or a question.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.27.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.27.0 [skip ci]
+  ([`21e65d1`](https://github.com/mfozmen/littlepress-ai/commit/21e65d15aa39d5b987069ba0fa2a2f9d404b4b48))
 
 ### Features
 
