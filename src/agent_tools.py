@@ -56,7 +56,7 @@ from typing import Callable
 
 from src.agent import Tool
 from src.builder import build_pdf
-from src.draft import Draft, slugify, strip_page_number, to_book
+from src.draft import Draft, output_paths, strip_page_number, to_book
 from src.imposition import impose_a5_to_a4
 from src.prune import prune
 from src.providers.image import ImageGenerationError, ImageProvider
@@ -1986,7 +1986,6 @@ def render_book_tool(
         impose = bool(input_.get("impose", True))
         source_dir = Path(get_session_root()) / _BOOK_GEN_DIR
         output_dir = source_dir / "output"
-        slug = slugify(draft.title)
         output_dir.mkdir(parents=True, exist_ok=True)
         # Just two outputs per render: ``<slug>.pdf`` (A5 reading
         # copy) and ``<slug>_A4_booklet.pdf`` (A4 print artefact).
@@ -1996,8 +1995,7 @@ def render_book_tool(
         # showing up for a 1-render session, with two pairs
         # identical to each other. The "rollback / compare drafts"
         # use case wasn't pulling its weight.
-        a5_path = (output_dir / f"{slug}.pdf").resolve()
-        booklet_path = (output_dir / f"{slug}_A4_booklet.pdf").resolve()
+        a5_path, booklet_path = output_paths(output_dir, draft.title)
 
         try:
             book = to_book(draft, source_dir)

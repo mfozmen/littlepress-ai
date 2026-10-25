@@ -1451,15 +1451,11 @@ def _resolve_render_paths(repl: Repl, source_dir: Path) -> tuple[Path, Path]:
     Versioned snapshots were dropped on the 2026-04-27 round —
     user complaint was 4 outputs per render with two pairs
     identical to each other."""
-    from src.draft import slugify
+    from src.draft import output_paths
 
     output_dir = source_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
-    slug = slugify(repl.draft.title)
-    return (
-        output_dir / f"{slug}.pdf",
-        output_dir / f"{slug}_A4_booklet.pdf",
-    )
+    return output_paths(output_dir, repl.draft.title)
 
 
 def _run_custom_render(
