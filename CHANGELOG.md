@@ -1,7 +1,48 @@
 # CHANGELOG
 
 
+## v1.30.0 (2026-10-26)
+
+### Bug Fixes
+
+- Open the A4 booklet alongside the A5 after a render
+  ([#109](https://github.com/mfozmen/littlepress-ai/pull/109),
+  [`647a5a8`](https://github.com/mfozmen/littlepress-ai/commit/647a5a84f775e501483fced8dcd0f9ea4044c42a))
+
+* feat(cli): add a `littlepress help` command
+
+Prints the usage plus a commands section (draft, update, help) and points at /help for the
+  in-session slash commands. --help shows the same commands section.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix: open the A4 booklet alongside the A5 after a render
+
+The render already wrote the booklet but only opened the A5, so the print file had to be found by
+  hand. A viewer failure on the booklet stays non-fatal.
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+- **cli**: Add a `littlepress help` command
+  ([#108](https://github.com/mfozmen/littlepress-ai/pull/108),
+  [`be36b8e`](https://github.com/mfozmen/littlepress-ai/commit/be36b8e794a07fc89635409dd150af3ada06d82d))
+
+Prints the usage plus a commands section (draft, update, help) and points at /help for the
+  in-session slash commands. --help shows the same commands section.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v1.29.0 (2026-10-25)
+
+### Chores
+
+- **release**: 1.29.0 [skip ci]
+  ([`0692b90`](https://github.com/mfozmen/littlepress-ai/commit/0692b9034e3fb0fd3afd152d9f767c2ea4e48cac))
 
 ### Features
 
