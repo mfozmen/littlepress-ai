@@ -1769,8 +1769,8 @@ def _render_message(a5: Path, *, opened: bool) -> str:
     )
 
 
-def _impose_to(a5: Path, booklet: Path, message: str) -> str:
-    """Produce the A4 booklet directly to its stable name."""
+def _impose_to(a5: Path, booklet: Path, message: str, opener) -> str:
+    """Produce the A4 booklet directly to its stable name and open it."""
     try:
         impose_a5_to_a4(a5, booklet)
     except Exception as e:
@@ -1778,6 +1778,10 @@ def _impose_to(a5: Path, booklet: Path, message: str) -> str:
             f"{message} Booklet imposition failed: {e}. The A5 "
             "stayed on disk — the user can still print it."
         )
+    try:
+        opener(booklet)
+    except Exception:
+        pass  # the path is in the message; the user can open it by hand
     return (
         f"{message} "
         f"A4 booklet written to {booklet} — print this one "
@@ -2023,7 +2027,7 @@ def render_book_tool(
         message = _render_message(a5_path, opened=opened)
 
         if impose:
-            message = _impose_to(a5_path, booklet_path, message)
+            message = _impose_to(a5_path, booklet_path, message, opener)
 
         # Housekeeping: drop orphan images from earlier AI retries.
         # The snapshot-cleanup half is a no-op now (no snapshots to

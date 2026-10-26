@@ -3141,16 +3141,16 @@ def test_render_book_opens_the_a5_in_the_default_viewer(tmp_path):
         open_file=lambda p: opened.append(Path(p)),
     )
 
-    tool.handler({})
+    tool.handler({"impose": False})
 
     a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
     assert len(opened) == 1
     assert opened[0].resolve() == a5.resolve()
 
 
-def test_render_book_only_opens_the_a5_not_the_booklet(tmp_path):
-    """The booklet is a print artefact — don't pop it up in the viewer
-    when the user asks for it; the A5 is the reading copy."""
+def test_render_book_opens_the_a5_then_the_booklet(tmp_path):
+    """The user wants both outputs on screen when the render finishes:
+    the A5 to read, the A4 booklet to print."""
     draft = _two_page_draft(tmp_path)
     opened: list[Path] = []
 
@@ -3162,8 +3162,29 @@ def test_render_book_only_opens_the_a5_not_the_booklet(tmp_path):
 
     tool.handler({"impose": True})
 
-    a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
-    assert [p.resolve() for p in opened] == [a5.resolve()]
+    out = tmp_path / ".book-gen" / "output"
+    assert [p.resolve() for p in opened] == [
+        (out / "the_brave_owl.pdf").resolve(),
+        (out / "the_brave_owl_A4_booklet.pdf").resolve(),
+    ]
+
+
+def test_render_book_booklet_viewer_failure_is_non_fatal(tmp_path):
+    draft = _two_page_draft(tmp_path)
+
+    def open_file(p):
+        if "booklet" in Path(p).name:
+            raise RuntimeError("no viewer here")
+
+    tool = render_book_tool(
+        get_draft=lambda: draft,
+        get_session_root=lambda: tmp_path,
+        open_file=open_file,
+    )
+
+    result = tool.handler({"impose": True})
+
+    assert "A4 booklet written" in result
 
 
 def test_render_book_viewer_failure_is_non_fatal(tmp_path):
@@ -3301,29 +3322,6 @@ def test_second_render_overwrites_first_no_archive(tmp_path):
     assert (output_dir / "the_brave_owl_vol_2_A4_booklet.pdf").is_file()
     # And no .v*.pdf appeared for either slug.
     assert list(output_dir.glob("*.v*.pdf")) == []
-
-
-def test_opener_targets_the_stable_a5(tmp_path):
-    """The auto-opener launches the stable A5 PDF — the reading
-    copy. The booklet is the print artefact and is NOT auto-opened
-    (user reads on screen, prints when ready)."""
-    draft = _two_page_draft(tmp_path)
-    opened: list[Path] = []
-
-    tool = render_book_tool(
-        get_draft=lambda: draft,
-        get_session_root=lambda: tmp_path,
-        open_file=lambda p: opened.append(Path(p)),
-    )
-
-    tool.handler({"impose": True})
-
-    a5 = tmp_path / ".book-gen" / "output" / "the_brave_owl.pdf"
-    booklet = tmp_path / ".book-gen" / "output" / "the_brave_owl_A4_booklet.pdf"
-    assert len(opened) == 1
-    assert opened[0].resolve() == a5.resolve()
-    # Booklet was NOT auto-opened.
-    assert booklet not in opened
 
 
 def test_render_book_auto_prunes_orphan_images(tmp_path):
