@@ -45,6 +45,23 @@ def test_cli_help_exits_zero(capsys):
     assert "littlepress" in captured.out.lower()
 
 
+def test_cli_help_subcommand_prints_usage_with_the_commands(capsys):
+    assert cli.main(["help"]) == 0
+
+    out = capsys.readouterr().out
+    assert "usage: littlepress" in out
+    assert "littlepress update" in out
+    assert "littlepress help" in out
+    assert "/help" in out
+
+
+def test_cli_dash_help_lists_the_commands_too(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    assert "littlepress update" in capsys.readouterr().out
+
+
 def test_cli_noargs_launches_repl_and_exits_on_eof(tmp_path, monkeypatch):
     # No arguments drops the user into the REPL; EOF on stdin exits cleanly.
     # Run from tmp_path so the REPL's session state stays isolated from the
