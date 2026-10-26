@@ -66,10 +66,20 @@ class SlashCompleter(Completer):
                 )
 
 
+_COMMANDS = """commands:
+  littlepress draft.pdf    load a draft and start the interactive session
+  littlepress              start the session; /load a draft later
+  littlepress update       update to the latest release
+  littlepress help         show this help
+
+Inside the session, type /help for the slash commands."""
+
+
 def main(argv: list[str] | None = None) -> int:
     import sys
 
-    if (argv if argv is not None else sys.argv[1:]) == ["update"]:
+    argv = argv if argv is not None else sys.argv[1:]
+    if argv == ["update"]:
         from src import update
 
         return update.update()
@@ -77,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="littlepress",
         description="Turn a child's picture-book draft PDF into a print-ready book.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_COMMANDS,
     )
     parser.add_argument("--version", action="version", version=_resolve_version())
     parser.add_argument(
@@ -84,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         help="PDF draft to load immediately (optional).",
     )
+    if argv == ["help"]:
+        parser.print_help()
+        return 0
     args = parser.parse_args(argv)
 
     import getpass

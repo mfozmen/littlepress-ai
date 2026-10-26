@@ -85,6 +85,8 @@ littlepress --version
 
 To update a checkout install to the latest release, run `littlepress update` (or `littlepress-ai update`). It pulls `main` and installs any new dependencies; it refuses to touch a checkout with uncommitted changes or one that isn't on `main`. Other installs get the pip command to run instead.
 
+`littlepress help` (or `littlepress --help`) lists the command-line usage; inside the session, `/help` lists the slash commands.
+
 DejaVu Sans is located automatically on Windows / Linux / macOS. If it cannot be found, drop `DejaVuSans.ttf` and `DejaVuSans-Bold.ttf` into a `fonts/` folder next to `build.py`.
 
 ## Usage — interactive (primary)
